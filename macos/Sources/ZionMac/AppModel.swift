@@ -27,6 +27,7 @@ private struct ImportedConfiguration: Decodable {
     var editing: ServerProfile?
     var editingPassword = ""
     var storageError = false
+    let helperInstallation: HelperInstallation
     let connection: BackendConnection
     private let preferences: ConnectionPreferencesStore
     private var preferencesReadable = true
@@ -35,7 +36,8 @@ private struct ImportedConfiguration: Decodable {
     private let secrets: any SecretStore
 
     /// Assemble native services without starting a core or modifying network preferences.
-    init(store: ProfileStore = ProfileStore(), secrets: any SecretStore = KeychainStore(), connection: BackendConnection? = nil) {
+    init(store: ProfileStore = ProfileStore(), secrets: any SecretStore = KeychainStore(), connection: BackendConnection? = nil, helperInstallation: HelperInstallation = HelperInstallation()) {
+        self.helperInstallation = helperInstallation
         self.store = store
         self.secrets = secrets
         let preferences = ConnectionPreferencesStore(directory: store.directory)
@@ -47,6 +49,7 @@ private struct ImportedConfiguration: Decodable {
             system: ConnectionController(engine: CoreProcess(), proxy: SystemProxyController(journal: store.directory.appendingPathComponent("proxy-recovery.plist"))),
             enhanced: [], selected: selected
         )
+        helperInstallation.onLog = { [weak self] message in self?.append(message) }
         self.connection.onLog = { [weak self] message in self?.append(message) }
         do { document = try store.load() }
         catch { storageError = true; alert = "无法读取服务器列表，现有配置未被覆盖。" }
@@ -68,7 +71,7 @@ private struct ImportedConfiguration: Decodable {
 
     /// Save an explicit transport choice only after the current owner has fully disconnected.
     func selectBackend(_ backend: ConnectionBackend) {
-        guard preferencesReadable else { return }
+        guard preferencesReadable, !helperInstallation.busy else { return }
         do {
             let previous = connection.selectedBackend
             try connection.select(backend)
@@ -77,18 +80,33 @@ private struct ImportedConfiguration: Decodable {
         } catch { alert = error.localizedDescription }
     }
 
-    var canConnect: Bool { !storageError && preferencesReadable && connection.readiness(for: connection.selectedBackend).canConnect }
+    var canConnect: Bool { !helperInstallation.busy && !storageError && preferencesReadable && connection.readiness(for: connection.selectedBackend).canConnect }
+
+    /// Allow component changes only after all network ownership and recovery have ended.
+    var canManageComponents: Bool { !storageError && connection.phase.idle && !connection.needsRecovery && !helperInstallation.busy && editing == nil }
+
+    /// Register the bundled helper without changing the connection backend or creating a TUN device.
+    func installHelper() {
+        guard canManageComponents else { return }
+        helperInstallation.install()
+    }
+
+    /// Remove the helper registration only while no connection owns network settings.
+    func uninstallHelper() async {
+        guard canManageComponents else { return }
+        await helperInstallation.uninstall()
+    }
 
     /// Select a profile only when doing so cannot silently change a running connection.
     func select(_ profile: ServerProfile) {
-        guard !storageError, connection.phase.idle else { return }
+        guard !storageError, !helperInstallation.busy, connection.phase.idle else { return }
         document.selectedID = profile.id
         persist()
     }
 
     /// Open a profile editor and retrieve its password only for this explicit edit action.
     func edit(_ profile: ServerProfile? = nil) {
-        guard !storageError, connection.phase.idle else { return }
+        guard !storageError, !helperInstallation.busy, connection.phase.idle else { return }
         do {
             let value = profile ?? ServerProfile()
             editingPassword = try profile.flatMap { try secrets.password(for: $0.id) } ?? ""
@@ -123,7 +141,7 @@ private struct ImportedConfiguration: Decodable {
 
     /// Remove a profile without leaving its password in the Keychain.
     func remove(_ profile: ServerProfile) {
-        guard !storageError, connection.phase.idle else { return }
+        guard !storageError, !helperInstallation.busy, connection.phase.idle else { return }
         do {
             let oldPassword = try secrets.password(for: profile.id)
             var next = document
@@ -145,6 +163,7 @@ private struct ImportedConfiguration: Decodable {
     /// Toggle the selected authenticated core and its owned system proxy settings.
     func toggle() async {
         if connection.phase.active || connection.phase.busy { _ = await connection.disconnect(); return }
+        guard !helperInstallation.busy else { return }
         guard !storageError else { alert = "Profile storage or app ownership is unavailable."; return }
         guard preferencesReadable else { alert = "请先修复接管方式设置文件。"; return }
         guard let profile = selectedProfile else { edit(); return }
@@ -157,7 +176,7 @@ private struct ImportedConfiguration: Decodable {
 
     /// Import JSON into the normal editor so secrets are stored only after explicit saving.
     func importJSON() {
-        guard !storageError, connection.phase.idle else { return }
+        guard !storageError, !helperInstallation.busy, connection.phase.idle else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
         panel.canChooseDirectories = false
@@ -206,7 +225,7 @@ extension AppModel {
         do {
             let allowed: Set<String>
             switch request.command {
-            case "status", "profiles.list", "connect", "disconnect": allowed = []
+            case "status", "profiles.list", "connect", "disconnect", "component.status", "component.install", "component.uninstall": allowed = []
             case "logs.read": allowed = ["limit"]
             case "profiles.import": allowed = ["name", "config"]
             case "profiles.select", "profiles.remove": allowed = ["id"]
@@ -225,6 +244,23 @@ extension AppModel {
         let arguments = request.arguments
         switch request.command {
         case "status": return controlStatus()
+        case "component.status":
+            helperInstallation.refresh()
+            return componentStatus()
+        case "component.install":
+            try requireControlIdle()
+            guard helperInstallation.bundled else { throw AppCommandError("component_missing", "This app bundle does not contain the helper.") }
+            guard helperInstallation.canInstall else { throw AppCommandError("component_state", "Inspect component status before requesting registration again.") }
+            helperInstallation.install()
+            guard helperInstallation.lastError == nil else { throw AppCommandError("operation_failed", "System registration failed; inspect the app logs.") }
+            return componentStatus()
+        case "component.uninstall":
+            try requireControlIdle()
+            guard helperInstallation.canUninstall else { throw AppCommandError("component_state", "No removable helper registration was found.") }
+            await helperInstallation.uninstall()
+            guard helperInstallation.lastError == nil else { throw AppCommandError("operation_failed", "System removal failed; inspect the app logs.") }
+            return componentStatus()
+
         case "logs.read":
             guard let raw = arguments["limit"], let limit = Int(raw), (1...100).contains(limit) else {
                 throw AppCommandError("invalid_arguments", "Log limit must be from 1 to 100.")
@@ -296,10 +332,16 @@ extension AppModel {
         }
     }
 
+    /// Report registration without conflating installed components with available TUN routing.
+    private func componentStatus() -> [String: Any] {
+        ["bundled": helperInstallation.bundled, "registration": helperInstallation.status.rawValue,
+         "busy": helperInstallation.busy, "tun_available": false]
+    }
+
     /// Reject metadata changes during a connection, recovery, or an open profile edit.
     private func requireControlIdle() throws {
         guard !storageError else { throw AppCommandError("storage_unavailable", "Profile storage is unreadable.") }
-        guard connection.phase.idle, !connection.needsRecovery, editing == nil else { throw AppCommandError("busy", "Disconnect, recover networking, and close the profile editor first.") }
+        guard !helperInstallation.busy, connection.phase.idle, !connection.needsRecovery, editing == nil else { throw AppCommandError("busy", "Disconnect, recover networking, and close the profile editor first.") }
     }
 
     /// Expose stable state names without returning passwords, logs, or private-key contents.

@@ -14,6 +14,7 @@ private enum Page: String, CaseIterable, Identifiable {
 /// The root window keeps navigation quiet and prioritizes the current connection.
 struct RootView: View {
     @Bindable var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var page: Page? = .overview
 
     var body: some View {
@@ -41,6 +42,7 @@ struct RootView: View {
             .navigationTitle((page ?? .overview).rawValue)
             .toolbar { ToolbarItem { Button { model.importJSON() } label: { Label("导入 JSON", systemImage: "square.and.arrow.down") }.disabled(!model.connection.phase.idle) } }
         }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { model.helperInstallation.refresh() } }
         .frame(minWidth: 780, minHeight: 540)
         .sheet(item: $model.editing) { profile in ProfileEditor(model: model, initial: profile, initialPassword: model.editingPassword) }
         .alert("Zion", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) { Button("好") { model.alert = nil } } message: { Text(model.alert ?? "") }
@@ -161,11 +163,12 @@ struct BackendPicker: View {
             )) {
                 ForEach(ConnectionBackend.allCases) { Text($0.title).tag($0) }
             }.pickerStyle(.segmented).labelsHidden()
-                .disabled(!model.connection.phase.idle || model.connection.needsRecovery)
+                .disabled(!model.connection.phase.idle || model.connection.needsRecovery || model.helperInstallation.busy)
             Text(model.connection.selectedBackend.explanation).font(.callout).foregroundStyle(.secondary)
             if let reason = model.connection.readiness(for: model.connection.selectedBackend).explanation {
                 Label(reason, systemImage: "info.circle").font(.callout).foregroundStyle(.orange)
             }
+            if model.connection.selectedBackend == .helperTun { HelperInstallationView(model: model) }
             Text("切换接管方式前需要先断开连接。系统代理只覆盖遵循系统 SOCKS 设置的应用。")
                 .font(.caption).foregroundStyle(.secondary)
         }

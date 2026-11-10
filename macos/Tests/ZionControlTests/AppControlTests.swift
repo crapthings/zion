@@ -134,6 +134,32 @@ import Testing
         #expect((invalid["error"] as? [String: String])?["code"] == "invalid_arguments")
     }
 
+    /// An agent can register a helper but approval never changes the unavailable TUN adapter state.
+    @Test func componentCommandsKeepApprovalSeparateFromTUN() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = RegistrationFixture()
+        let app = AppModel(store: ProfileStore(directory: directory), secrets: CommandSecrets(),
+            connection: BackendConnection(system: ConnectionController(engine: CommandEngine(), proxy: CommandProxy()), enhanced: [], selected: .helperTun),
+            helperInstallation: HelperInstallation(service: service, bundled: true))
+        app.editing = ServerProfile()
+        #expect(!app.canManageComponents)
+        let busy = try await call(app, "component.install")
+        #expect((busy["error"] as? [String: String])?["code"] == "busy")
+        #expect(service.registers == 0)
+        app.editing = nil
+        let installed = try await call(app, "component.install")
+        let result = try #require(installed["result"] as? [String: Any])
+        #expect(result["registration"] as? String == "requiresApproval")
+        #expect(result["tun_available"] as? Bool == false)
+        service.status = .enabled
+        let approved = try await call(app, "component.status")
+        #expect((approved["result"] as? [String: Any])?["registration"] as? String == "enabled")
+        #expect(!app.connection.readiness(for: .helperTun).canConnect)
+        #expect(try await call(app, "component.uninstall")["ok"] as? Bool == true)
+        #expect(service.status == .notRegistered)
+    }
+
     /// A real Rust CLI reaches the Swift socket without launching the GUI or writing system settings.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["ZION_CONTROL_CLI"] != nil))
     func rustCLIReachesSwiftControlSocket() async throws {

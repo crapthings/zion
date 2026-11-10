@@ -10,7 +10,7 @@ Use Rust 1.91 or later and an Xcode toolchain supporting Swift 6:
 python3 scripts/build-macos.py
 ```
 
-The script builds for the host architecture and creates `target/macos/Zion.app`, including `Contents/Helpers/zion-core` and the linked Rust packet engine. Signing is local ad hoc signing; Developer ID distribution, notarization, and NetworkExtension entitlements are not configured.
+The script builds for the host architecture and creates `target/macos/Zion.app`, including `Contents/Helpers/zion-core` and the linked Rust packet engine. Signing defaults to local ad hoc signing. `ZION_CODESIGN_IDENTITY` selects an installed identity for the app and helpers; notarization and NetworkExtension entitlements are not configured.
 
 For a standalone Swift build:
 
@@ -62,6 +62,10 @@ A mode-`0600` recovery journal, `proxy-recovery.plist`, is saved before settings
 The app does not continuously track new services or network-location changes. A forced exit can leave settings and the core process behind; recovery is available on the next launch. There is no independent cleanup daemon.
 
 Only applications honoring system SOCKS settings are covered. This mode provides neither full-device capture nor a kill switch. NetworkExtension and helper-based TUN adapters are [unfinished](backends.md).
+
+## Helper component
+
+The Helper TUN selection includes install, approval, refresh, and uninstall controls backed by Service Management. Registration and TUN readiness are separate: the current component has no network-management operations. See [backends](backends.md) for packaging, signing, and remaining work.
 
 ## Tests
 

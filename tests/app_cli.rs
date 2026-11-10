@@ -159,3 +159,17 @@ fn invalid_log_limit_is_rejected() {
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
 }
+
+/// Component registration requests remain explicit and do not implicitly connect a tunnel.
+#[test]
+fn component_install_is_a_separate_command() {
+    let (output, request) = call(
+        &["component", "install"],
+        json!({"version":1,"ok":true,"result":{"registration":"requiresApproval","tun_available":false}}),
+    );
+    assert!(output.status.success());
+    assert_eq!(
+        request,
+        json!({"version":1,"command":"component.install","arguments":{}})
+    );
+}

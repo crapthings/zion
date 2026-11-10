@@ -6,9 +6,19 @@ The app stores one selected backend and allows switching while disconnected and 
 | --- | --- |
 | System proxy | Connected to the Rust SOCKS core and macOS settings controller |
 | NetworkExtension | Selection only; provider, activation, and deployment are missing |
-| Helper TUN | Selection only; privileged service, IPC, utun, route, and DNS management are missing |
+| Helper TUN | Bundled helper with app-managed registration and read-only IPC; utun, routing, and DNS management are missing |
 
 Unavailable backends cannot connect. Selection is saved in `connection.json`; corrupt preferences produce an error rather than selecting another backend. Connection failure does not cause automatic fallback.
+
+## Helper installation
+
+Select **Helper TUN** in the app to install the bundled component, open system approval settings, refresh status, or remove it. Component changes require a disconnected app with no pending recovery. The app refreshes approval status when it becomes active.
+
+Registration uses Apple's `SMAppService.daemon`, with the plist in `Contents/Library/LaunchDaemons` and the executable in `Contents/Library/HelperTools`. macOS requires administrator approval before the daemon can run. The app does not copy files into system launchd directories or collect an administrator password. Apple recommends keeping daemon-hosting apps in `/Applications`. See [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice).
+
+An approved registration does **not** make TUN usable. The current helper only reports capabilities; it cannot create interfaces or change network settings. IPC accepts the `dev.zion.client` app signed by the helper's own Apple signing team. Ad hoc builds cannot establish that identity and reject IPC clients. Real registration, approval, and signed IPC have not been exercised by automated tests.
+
+Local packaging defaults to ad hoc signing. Set `ZION_CODESIGN_IDENTITY` to an installed signing identity to sign the app, core, and helper consistently; notarization remains outside the build script. Registering an updated helper may require removal and re-registration.
 
 ## Shared packet engine
 
@@ -40,4 +50,4 @@ The packaging script enables the feature and links the static library. Standalon
 
 Tests cover raw IPv4/IPv6 TCP and UDP, half-close, empty datagrams, queue limits, authentication, and native start/stop/restart. Backend controller tests use substitute adapters. No test installs a helper or extension, creates utun, or changes system networking.
 
-Remaining platform work includes authorized installation, caller identity checks, endpoint loop prevention, route and DNS policy, network changes, and crash recovery.
+Remaining platform work includes the TUN control IPC, utun creation, endpoint loop prevention, route and DNS policy, network changes, and crash recovery.

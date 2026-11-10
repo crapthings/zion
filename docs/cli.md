@@ -27,6 +27,18 @@ Profiles cannot change while connected, awaiting recovery, or being edited in th
 
 `connect` succeeds only after the core is ready and system proxy activation completes. Calling it while already connected returns current status. `disconnect` also retries pending network recovery. The app must remain running; the CLI does not launch it automatically.
 
+## Helper registration
+
+```sh
+./target/release/zion app component status
+./target/release/zion app component install
+./target/release/zion app component uninstall
+```
+
+Install and removal require a disconnected app with no pending recovery or profile edit. Install requests system registration; it does not grant administrator approval. Complete approval through the app's system-settings button.
+
+Results contain `bundled`, `registration`, `busy`, and `tun_available`. Registration values are `notRegistered`, `requiresApproval`, `enabled`, `notFound`, and `unknown`. `tun_available` remains false while the TUN adapter is unfinished, even when registration is enabled. Missing payloads return `component_missing`; invalid registration transitions return `component_state`.
+
 ## Agent contract
 
 Responses are JSON on stdout, with version `1`. Exit code `0` means success; `1` means an operation or transport failure. CLI syntax errors use Clap's normal usage output and exit code `2`.
@@ -58,6 +70,7 @@ Requests are one JSON line of at most 64 KiB; responses are at most 256 KiB. Eig
 | Command | Arguments |
 | --- | --- |
 | `status`, `connect`, `disconnect`, `profiles.list` | Empty object |
+| `component.status`, `component.install`, `component.uninstall` | Empty object |
 | `logs.read` | `limit` (string integer, 1–100) |
 | `profiles.import` | `name`, `config` (client JSON encoded as a string) |
 | `profiles.select`, `profiles.remove` | `id` (UUID) |

@@ -24,6 +24,7 @@ extension AppModel {
     var diagnosticReport: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
         var lines = ["Zion \(version)", Date().ISO8601Format(), ProcessInfo.processInfo.operatingSystemVersionString]
+        lines.append("辅助组件: " + helperInstallation.status.title)
         lines += diagnosticFields.map { "\($0.label): \($0.value)" }
         if let error = connection.lastError { lines.append("最近错误: " + error) }
         if let reason = connection.readiness(for: connection.selectedBackend).explanation { lines.append(reason) }

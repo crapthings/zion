@@ -21,6 +21,16 @@ def assemble(root, swift_directory):
     contents = app / "Contents"
     (contents / "MacOS").mkdir(parents=True)
     (contents / "Helpers").mkdir()
+    (contents / "Library/HelperTools").mkdir(parents=True)
+    (contents / "Library/LaunchDaemons").mkdir()
+    shutil.copy2(swift_directory / "ZionHelper", contents / "Library/HelperTools/zion-helper")
+    daemon = {
+        "Label": "dev.zion.helper",
+        "BundleProgram": "Contents/Library/HelperTools/zion-helper",
+        "MachServices": {"dev.zion.helper": True},
+    }
+    with (contents / "Library/LaunchDaemons/dev.zion.helper.plist").open("wb") as output:
+        plistlib.dump(daemon, output)
     shutil.copy2(swift_directory / "ZionMac", contents / "MacOS/Zion")
     shutil.copy2(root / "target/release/zion", contents / "Helpers/zion-core")
     metadata = {
@@ -54,8 +64,13 @@ def main():
         cwd=root, text=True,
     ).strip()
     app = assemble(root, pathlib.Path(location))
-    run(["codesign", "--force", "--sign", "-", str(app / "Contents/Helpers/zion-core")], root)
-    run(["codesign", "--force", "--sign", "-", str(app)], root)
+    identity = os.environ.get("ZION_CODESIGN_IDENTITY", "-")
+    signing = ["codesign", "--force", "--sign", identity]
+    if identity != "-":
+        signing += ["--options", "runtime", "--timestamp"]
+    run(signing + [str(app / "Contents/Helpers/zion-core")], root)
+    run(signing + ["--identifier", "dev.zion.helper", str(app / "Contents/Library/HelperTools/zion-helper")], root)
+    run(signing + [str(app)], root)
     run(["codesign", "--verify", "--deep", "--strict", str(app)], root)
     print(app)
 

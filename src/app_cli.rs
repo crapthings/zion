@@ -26,6 +26,11 @@ enum AppCommand {
         #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u16).range(1..=100))]
         limit: u16,
     },
+    /// Manage the bundled helper registration without claiming TUN readiness.
+    Component {
+        #[command(subcommand)]
+        command: ComponentCommand,
+    },
     /// Connect the selected profile using the selected backend.
     Connect,
     /// Disconnect and restore network settings, or retry pending recovery.
@@ -40,6 +45,17 @@ enum AppCommand {
         #[arg(value_parser = ["systemProxy", "networkExtension", "helperTun"])]
         backend: String,
     },
+}
+
+/// Component commands preserve system approval as a separate step from registration.
+#[derive(Subcommand)]
+enum ComponentCommand {
+    /// Read bundled payload and OS registration status.
+    Status,
+    /// Ask macOS to register the helper; administrator approval may still be required.
+    Install,
+    /// Remove the helper registration while disconnected.
+    Uninstall,
 }
 
 /// Profile operations use stable UUIDs and import secrets through files or stdin rather than arguments.
@@ -79,6 +95,11 @@ fn request(options: &AppArgs) -> anyhow::Result<Zeroizing<Vec<u8>>> {
     let mut arguments = BTreeMap::<String, String>::new();
     let command = match &options.command {
         AppCommand::Status => "status",
+        AppCommand::Component { command } => match command {
+            ComponentCommand::Status => "component.status",
+            ComponentCommand::Install => "component.install",
+            ComponentCommand::Uninstall => "component.uninstall",
+        },
         AppCommand::Logs { limit } => {
             arguments.insert("limit".into(), limit.to_string());
             "logs.read"

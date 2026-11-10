@@ -43,7 +43,7 @@ import Observation
         switch backend {
         case .systemProxy: return .ready
         case .networkExtension: return .unavailable("NetworkExtension 提供器尚未接入，当前可保存此选择。")
-        case .helperTun: return .unavailable("特权辅助服务尚未接入，当前可保存此选择。")
+        case .helperTun: return .unavailable("TUN 的 utun、路由与 DNS 接管尚未接入。")
         }
     }
 

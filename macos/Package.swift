@@ -16,10 +16,13 @@ let package = Package(
     products: [
         .library(name: "ZionControl", targets: ["ZionControl"]),
         .executable(name: "ZionMac", targets: ["ZionMac"]),
+        .executable(name: "ZionHelper", targets: ["ZionHelper"]),
     ],
     targets: [
         .target(name: "CZionPacket", publicHeadersPath: "include"),
-        .target(name: "ZionControl", dependencies: ["CZionPacket"], swiftSettings: packetSettings, linkerSettings: packetLinker),
+        .target(name: "ZionHelperProtocol"),
+        .executableTarget(name: "ZionHelper", dependencies: ["ZionHelperProtocol"]),
+        .target(name: "ZionControl", dependencies: ["CZionPacket", "ZionHelperProtocol"], swiftSettings: packetSettings, linkerSettings: packetLinker),
         .executableTarget(name: "ZionMac", dependencies: ["ZionControl"]),
         .testTarget(name: "ZionControlTests", dependencies: ["ZionControl", "ZionMac"]),
     ]
