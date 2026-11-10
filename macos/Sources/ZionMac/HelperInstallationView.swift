@@ -23,19 +23,15 @@ struct HelperInstallationView: View {
                 Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled)
             }
             HStack {
-                if model.helperInstallation.canInstall {
-                    Button("安装辅助组件") { model.installHelper() }.disabled(!model.canManageComponents)
-                }
-                if model.helperInstallation.status == .requiresApproval {
-                    Button("前往系统授权", systemImage: "arrow.up.forward.app") { model.helperInstallation.openApprovalSettings() }
-                }
+                Button("安装辅助组件") { model.installHelper() }
+                    .disabled(!model.canManageComponents || !model.helperInstallation.canInstall)
+                Button("前往系统授权", systemImage: "arrow.up.forward.app") { model.helperInstallation.openApprovalSettings() }
+                    .disabled(model.helperInstallation.status != .requiresApproval || model.helperInstallation.busy)
                 Button("刷新状态", systemImage: "arrow.clockwise") { model.helperInstallation.refresh() }
                     .disabled(model.helperInstallation.busy)
-                if model.helperInstallation.canUninstall {
-                    Spacer()
-                    Button("卸载组件", role: .destructive) { Task { await model.uninstallHelper() } }
-                        .disabled(!model.canManageComponents)
-                }
+                Spacer()
+                Button("卸载组件", role: .destructive) { Task { await model.uninstallHelper() } }
+                    .disabled(!model.canManageComponents || !model.helperInstallation.canUninstall)
             }.controlSize(.small)
         }.padding(14).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
     }

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import ZionControl
 
-/// The profile editor collects only connection essentials and reveals advanced fields on demand.
+/// The profile editor presents connection, certificate, and network options without collapsed sections.
 struct ProfileEditor: View {
     let model: AppModel
     @State private var profile: ServerProfile
@@ -30,16 +30,14 @@ struct ProfileEditor: View {
                         fileRow("私钥", path: $profile.privateKey)
                     }
                 }
-                Section {
-                    DisclosureGroup("证书与网络选项") {
-                        fileRow("服务端 CA", path: $profile.ca)
-                        Text("公共 CA 证书无需填写；私有 CA 需要选择对应证书。").font(.caption).foregroundStyle(.secondary)
-                        TextField("证书名称", text: $profile.serverName, prompt: Text("默认使用连接地址中的主机名"))
-                        TextField("出口网卡", text: $profile.interface, prompt: Text("自动；运行其他代理时可指定 en1"))
-                        if profile.authentication == .password {
-                            fileRow("附加客户端证书", path: $profile.certificate)
-                            fileRow("附加私钥", path: $profile.privateKey)
-                        }
+                Section("证书与网络选项") {
+                    fileRow("服务端 CA", path: $profile.ca)
+                    Text("公共 CA 证书无需填写；私有 CA 需要选择对应证书。").font(.caption).foregroundStyle(.secondary)
+                    TextField("证书名称", text: $profile.serverName, prompt: Text("默认使用连接地址中的主机名"))
+                    TextField("出口网卡", text: $profile.interface, prompt: Text("自动；运行其他代理时可指定 en1"))
+                    if profile.authentication == .password {
+                        fileRow("附加客户端证书", path: $profile.certificate)
+                        fileRow("附加私钥", path: $profile.privateKey)
                     }
                 }
                 if let error { Text(error).font(.callout).foregroundStyle(.red) }

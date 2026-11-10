@@ -4,7 +4,6 @@ import ZionControl
 /// The first-launch guide presents observed network state and leaves every configuration action explicit.
 struct SetupGuideView: View {
     let model: AppModel
-    @State private var showComponent = false
 
     /// Distinguish Zion's established proxy ownership from proxy flags set by another application.
     private var zionProxyActive: Bool {
@@ -123,9 +122,7 @@ struct SetupGuideView: View {
                 } else { Text("虚拟接口状态待检测。").font(.callout).foregroundStyle(.secondary) }
                 Text("增强模式用于接管不遵循系统代理的应用。当前 TUN 网络接入尚未完成，安装辅助组件后仍不可启用。")
                     .font(.callout).foregroundStyle(.secondary)
-                DisclosureGroup("管理辅助组件", isExpanded: $showComponent) {
-                    HelperInstallationView(model: model).padding(.top, 8)
-                }
+                HelperInstallationView(model: model)
             }
         }
     }
