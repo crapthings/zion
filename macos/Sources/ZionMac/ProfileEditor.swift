@@ -23,6 +23,9 @@ struct ProfileEditor: View {
                 Section {
                     TextField("名称", text: $profile.name)
                     TextField("地址", text: $profile.server, prompt: Text("example.com:38443"))
+                    Picker("隧道传输", selection: $profile.transport) {
+                        ForEach(TunnelTransport.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }.pickerStyle(.segmented)
                     Picker("认证", selection: $profile.authentication) { Text("密码").tag(Authentication.password); Text("客户端证书").tag(Authentication.certificate) }.pickerStyle(.segmented)
                     if profile.authentication == .password { SecureField("密码", text: $password) }
                     if profile.authentication == .certificate {

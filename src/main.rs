@@ -19,7 +19,10 @@ use zion::{
 
 /// Root options preserve direct SOCKS5 mode while exposing explicit tunnel subcommands.
 #[derive(Parser)]
-#[command(version, about = "TCP/UDP proxy with authenticated QUIC tunnels")]
+#[command(
+    version,
+    about = "TCP/UDP proxy with authenticated QUIC or TCP/TLS tunnels"
+)]
 struct Args {
     #[command(subcommand)]
     mode: Option<Mode>,
@@ -37,19 +40,19 @@ enum Mode {
     App(zion::app_cli::AppArgs),
     /// Issue a fresh CA and client/server identities into a new directory.
     Credentials(CredentialArgs),
-    /// Run the remote authenticated QUIC server.
+    /// Run the remote authenticated tunnel server.
     Server(ServerArgs),
-    /// Run a local SOCKS5 listener using a remote QUIC server.
+    /// Run a local SOCKS5 listener using a remote tunnel server.
     Client(ClientArgs),
 }
 
 /// Resource budgets apply consistently to direct and tunneled sessions.
 #[derive(ClapArgs)]
 struct Limits {
-    /// Maximum active sessions, including unauthenticated QUIC handshakes.
+    /// Maximum active sessions, including unauthenticated tunnel handshakes.
     #[arg(long, default_value = "256")]
     max_connections: NonZeroUsize,
-    /// SOCKS5 or QUIC handshake deadline in seconds.
+    /// SOCKS5 or tunnel handshake deadline in seconds.
     #[arg(long, default_value = "10")]
     handshake_timeout: NonZeroU64,
     /// Destination connection and DNS deadline in seconds.
@@ -73,18 +76,21 @@ struct LocalArgs {
 /// Client options select a remote address and its required TLS identity.
 #[derive(ClapArgs)]
 struct ClientArgs {
+    /// Network carrier: quic/udp or tls/tcp, without automatic fallback.
+    #[arg(long, value_enum, default_value = "quic")]
+    transport: zion::tunnel::Transport,
     /// Emit JSON process events after verifying remote authentication and local readiness.
     #[arg(long)]
     events_json: bool,
     /// Minimal JSON or YAML configuration file.
-    #[arg(short, long, conflicts_with_all = ["remote", "server_name", "credentials", "interface", "listen", "max_connections", "handshake_timeout", "connect_timeout", "udp_idle_timeout"])]
+    #[arg(short, long, conflicts_with_all = ["transport", "remote", "server_name", "credentials", "interface", "listen", "max_connections", "handshake_timeout", "connect_timeout", "udp_idle_timeout"])]
     config: Option<PathBuf>,
     #[command(flatten)]
     local: LocalArgs,
-    /// Network interface used for QUIC egress on macOS or Linux.
+    /// Network interface used for tunnel egress on macOS or Linux.
     #[arg(long)]
     interface: Option<String>,
-    /// Remote QUIC server IP address and UDP port.
+    /// Remote server IP address and port.
     #[arg(long, required_unless_present = "config")]
     remote: Option<SocketAddr>,
     /// DNS name or IP address that must match the server certificate.
@@ -95,13 +101,16 @@ struct ClientArgs {
     credentials: Option<PathBuf>,
 }
 
-/// Server options select the remote QUIC listener and its trust material.
+/// Server options select authenticated carrier listeners and their trust material.
 #[derive(ClapArgs)]
 struct ServerArgs {
+    /// Listen on UDP/QUIC, TCP/TLS, or both protocol sockets at the same port.
+    #[arg(long, value_enum, default_value = "quic")]
+    transport: zion::tunnel::ServerTransport,
     /// Minimal JSON or YAML configuration file.
-    #[arg(short, long, conflicts_with_all = ["listen", "credentials", "max_connections", "handshake_timeout", "connect_timeout", "udp_idle_timeout"])]
+    #[arg(short, long, conflicts_with_all = ["transport", "listen", "credentials", "max_connections", "handshake_timeout", "connect_timeout", "udp_idle_timeout"])]
     config: Option<PathBuf>,
-    /// QUIC UDP listener address.
+    /// Listener address for the selected TCP and UDP carriers.
     #[arg(long, default_value = "[::]:8443")]
     listen: SocketAddr,
     /// Directory containing ca.pem, server.pem, and server.key.
@@ -198,7 +207,7 @@ async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("--credentials is required"))?;
             let identity = Identity::load(credentials, "server")?;
             let config = options.limits.config(options.listen);
-            TunnelServer::bind(options.listen, identity, config)?
+            TunnelServer::bind_transport(options.listen, identity, config, None, options.transport)?
                 .run(shutdown)
                 .await
         }
@@ -213,15 +222,19 @@ async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("--credentials is required"))?;
             let identity = Identity::load(credentials, "client")?;
             let mut config = options.local.limits.config(options.local.listen);
-            config.tunnel = Some(Client::new_with_interface(
-                options
-                    .remote
-                    .ok_or_else(|| anyhow::anyhow!("--remote is required"))?,
+            config.tunnel = Some(Client::with_transport(
+                vec![
+                    options
+                        .remote
+                        .ok_or_else(|| anyhow::anyhow!("--remote is required"))?,
+                ],
                 options
                     .server_name
                     .ok_or_else(|| anyhow::anyhow!("--server-name is required"))?,
                 identity,
                 options.interface.as_deref(),
+                None,
+                options.transport,
             )?);
             run_client(config, shutdown, options.events_json).await
         }

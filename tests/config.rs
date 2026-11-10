@@ -27,9 +27,15 @@ struct Pair {
 impl Pair {
     /// Build matching client and server files using password, certificate, or combined authentication.
     async fn open(password: bool, certificate: bool) -> Self {
+        Self::open_transport(password, certificate, "quic").await
+    }
+
+    /// Select the carrier through the same JSON/YAML schema used by deployed clients and servers.
+    async fn open_transport(password: bool, certificate: bool, transport: &str) -> Self {
         let directory = tempfile::tempdir().unwrap();
         tls::generate(&directory.path().join("identity"), "127.0.0.1").unwrap();
         let mut server = serde_json::json!({"listen":"127.0.0.1:0", "cert":"identity/server.pem", "key":"identity/server.key"});
+        server["transport"] = transport.into();
         if password {
             server["password"] = "shared-secret-for-tests".into();
         }
@@ -42,7 +48,8 @@ impl Pair {
         let address = server.local_addr().unwrap();
         let shutdown = CancellationToken::new();
         let task = tokio::spawn(server.run(shutdown.clone()));
-        let mut client = format!("server: {address}\nca: identity/ca.pem\n");
+        let mut client =
+            format!("server: {address}\ntransport: {transport}\nca: identity/ca.pem\n");
         if password {
             client.push_str("password: shared-secret-for-tests\n");
         }
@@ -80,7 +87,12 @@ impl Drop for Pair {
 
 /// Exercise actual TCP and UDP forwarding through an authenticated configured pair.
 async fn forwards(password: bool, certificate: bool) {
-    let pair = Pair::open(password, certificate).await;
+    forwards_transport(password, certificate, "quic").await;
+}
+
+/// Both carrier modes forward the same TCP/UDP commands from real configuration files.
+async fn forwards_transport(password: bool, certificate: bool, transport: &str) {
+    let pair = Pair::open_transport(password, certificate, transport).await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let target = listener.local_addr().unwrap();
     let producer = tokio::spawn(async move {
@@ -124,7 +136,7 @@ async fn forwards(password: bool, certificate: bool) {
         .unwrap();
     assert_eq!(&buffer[..length], b"configured UDP");
     destination.send_to(b"UDP reply", source).await.unwrap();
-    let response = timeout(Duration::from_secs(2), udp.guard.0.read_datagram())
+    let response = timeout(Duration::from_secs(2), udp.receive_datagram())
         .await
         .unwrap()
         .unwrap();
@@ -427,4 +439,45 @@ async fn machine_events_reject_wrong_password_without_leaking_it() {
     ));
     assert!(!stdout.contains("wrong-secret-native-test"));
     assert!(!stderr.contains("wrong-secret-native-test"));
+}
+
+/// File-based TLS mode preserves password, certificate, and combined authentication for both target protocols.
+#[tokio::test]
+async fn tls_json_yaml_authentication_modes_forward() {
+    for (password, certificate) in [(true, false), (false, true), (true, true)] {
+        forwards_transport(password, certificate, "tls").await;
+    }
+}
+
+/// Carrier aliases are explicit while unknown or null values cannot silently select a default.
+#[test]
+fn transport_configuration_is_strict_and_backward_compatible() {
+    for (value, expected) in [
+        ("quic", zion::tunnel::Transport::Quic),
+        ("udp", zion::tunnel::Transport::Quic),
+        ("tls", zion::tunnel::Transport::Tls),
+        ("tcp", zion::tunnel::Transport::Tls),
+    ] {
+        let client: ClientConfig = serde_json::from_value(
+            serde_json::json!({"server":"localhost:8443","password":"test","transport":value}),
+        )
+        .unwrap();
+        assert_eq!(client.transport, expected);
+    }
+    let legacy: ClientConfig =
+        serde_json::from_value(serde_json::json!({"server":"localhost:8443","password":"test"}))
+            .unwrap();
+    assert_eq!(legacy.transport, zion::tunnel::Transport::Quic);
+    for value in [
+        serde_json::Value::Null,
+        serde_json::json!("auto"),
+        serde_json::json!("both"),
+    ] {
+        assert!(
+            serde_json::from_value::<ClientConfig>(
+                serde_json::json!({"server":"localhost:8443","password":"test","transport":value})
+            )
+            .is_err()
+        );
+    }
 }

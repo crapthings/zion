@@ -1,23 +1,22 @@
 //! Client sessions verify peer identities before exchanging bounded tunnel requests.
 
+use super::{Session, session::SessionIo, stream::TlsClient};
 use super::{
     tls::Identity,
     wire::{self, Request, Response},
 };
 use anyhow::{Context, ensure};
-use quinn::{Connection, Endpoint, RecvStream, SendStream};
+use quinn::{Connection, Endpoint};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tokio::{
-    io::{Join, join},
-    time::timeout,
-};
+use tokio::{io::join, time::timeout};
 
-/// A client shares one UDP endpoint while opening isolated authenticated sessions.
+/// A client selects one verified carrier and opens isolated authenticated sessions.
 #[derive(Debug)]
 pub struct Client {
     targets: Vec<(SocketAddr, Endpoint)>,
     server_name: String,
     password: Option<super::auth::Password>,
+    tls: Option<TlsClient>,
 }
 
 /// A connection guard closes its session when the owning relay is released.
@@ -30,30 +29,7 @@ impl Drop for ConnectionGuard {
     }
 }
 
-/// A session owns an authenticated connection and its single bidirectional stream.
-pub struct Session {
-    pub guard: ConnectionGuard,
-    pub io: Join<RecvStream, SendStream>,
-    pub bound: SocketAddr,
-}
-
-/// Session operations finish TCP delivery before releasing their connection.
-impl Session {
-    /// Send a datagram while distinguishing a dropped packet from a failed connection.
-    pub fn send_datagram(
-        &self,
-        packet: bytes::Bytes,
-    ) -> anyhow::Result<crate::datagram::SendOutcome> {
-        crate::datagram::send_quic(&self.guard.0, packet)
-    }
-
-    /// Wait for previously finished stream data to be acknowledged within a deadline.
-    pub async fn acknowledged(&mut self) -> anyhow::Result<()> {
-        super::finish::acknowledged(self.io.writer(), Duration::from_secs(5)).await
-    }
-}
-
-/// Client operations perform mutual TLS and validate the server's command response.
+/// Client operations verify server identity and validate authenticated command responses.
 impl Client {
     /// Create an endpoint with explicit trust and a client certificate.
     pub fn new(
@@ -140,6 +116,38 @@ impl Client {
             targets,
             server_name,
             password,
+            tls: None,
+        }))
+    }
+
+    /// Build exactly the requested transport while sharing certificate and authentication policy.
+    pub fn with_transport(
+        remotes: Vec<SocketAddr>,
+        server_name: String,
+        identity: Identity,
+        interface: Option<&str>,
+        password: Option<super::auth::Password>,
+        transport: super::Transport,
+    ) -> anyhow::Result<Arc<Self>> {
+        if transport == super::Transport::Quic {
+            return Self::with_addresses(remotes, server_name, identity, interface, password);
+        }
+        ensure!(
+            password.is_some() || identity.has_certificate(),
+            "configure a password or client certificate"
+        );
+        let tls = TlsClient::new(
+            remotes,
+            server_name.clone(),
+            identity,
+            interface,
+            password.clone(),
+        )?;
+        Ok(Arc::new(Self {
+            targets: Vec::new(),
+            server_name,
+            password,
+            tls: Some(tls),
         }))
     }
 
@@ -195,6 +203,9 @@ impl Client {
 
     /// Establish TLS and exchange one validated control request within a shared deadline.
     async fn open(&self, mut request: Request, deadline: Duration) -> anyhow::Result<Session> {
+        if let Some(client) = &self.tls {
+            return client.open(request, deadline).await;
+        }
         timeout(deadline, async {
             request.validate()?;
             let guard = self.connect().await?;
@@ -221,9 +232,10 @@ impl Client {
                 "peer does not support QUIC datagrams"
             );
             Ok(Session {
-                guard,
-                io,
+                guard: Some(guard),
+                io: SessionIo::Quic(io),
                 bound: response.bound,
+                datagrams: None,
             })
         })
         .await

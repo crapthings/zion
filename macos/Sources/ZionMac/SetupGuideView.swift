@@ -60,7 +60,7 @@ struct SetupGuideView: View {
                 Image(systemName: "server.rack").font(.title2).foregroundStyle(.secondary).frame(width: 32)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(model.selectedProfile?.name ?? "添加服务器").font(.headline)
-                    Text(model.selectedProfile?.server ?? "连接前需要一台配置好的服务器。").font(.callout).foregroundStyle(.secondary)
+                    Text(model.selectedProfile.map { $0.server + " · " + $0.transport.title } ?? "连接前需要一台配置好的服务器。").font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button(model.selectedProfile == nil ? "添加服务器" : "编辑") { model.edit(model.selectedProfile) }

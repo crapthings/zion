@@ -1,4 +1,4 @@
-//! The QUIC listener bounds authenticated sessions and dispatches one operation per connection.
+//! A listener group bounds authenticated sessions across the selected TCP and UDP carriers.
 
 use super::{
     client::ConnectionGuard,
@@ -20,9 +20,11 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-/// A tunnel server owns its authenticated QUIC listener and resource limits.
+/// A tunnel server owns its selected listeners and their shared admission budget.
 pub struct TunnelServer {
-    endpoint: Endpoint,
+    endpoint: Option<Endpoint>,
+    tls: Option<super::TlsServer>,
+    budget: std::sync::Arc<tokio::sync::Semaphore>,
     config: Config,
     password: Option<super::auth::Password>,
 }
@@ -34,19 +36,98 @@ impl TunnelServer {
         Self::bind_with_password(listen, identity, config, None)
     }
 
-    /// Bind a TLS server that requires a password, trusted client certificates, or both.
+    /// Bind a QUIC server that requires a password, trusted client certificates, or both.
     pub fn bind_with_password(
         listen: SocketAddr,
         identity: Identity,
         config: Config,
         password: Option<super::auth::Password>,
     ) -> anyhow::Result<Self> {
+        Self::bind_transport(
+            listen,
+            identity,
+            config,
+            password,
+            super::ServerTransport::Quic,
+        )
+    }
+
+    /// Bind QUIC, TCP/TLS, or both protocol sockets at one numeric port.
+    pub fn bind_transport(
+        listen: SocketAddr,
+        identity: Identity,
+        config: Config,
+        password: Option<super::auth::Password>,
+        transport: super::ServerTransport,
+    ) -> anyhow::Result<Self> {
+        let attempts = if listen.port() == 0 && transport == super::ServerTransport::Both {
+            8
+        } else {
+            1
+        };
+        for attempt in 0..attempts {
+            match Self::bind_once(
+                listen,
+                identity.clone(),
+                config.clone(),
+                password.clone(),
+                transport,
+            ) {
+                Err(error)
+                    if attempt + 1 < attempts
+                        && error
+                            .downcast_ref::<std::io::Error>()
+                            .is_some_and(|error| error.kind() == std::io::ErrorKind::AddrInUse) =>
+                {
+                    continue;
+                }
+                result => return result,
+            }
+        }
+        unreachable!("at least one binding attempt")
+    }
+
+    /// Release partial listeners before retrying a same-port ephemeral bind collision.
+    fn bind_once(
+        listen: SocketAddr,
+        identity: Identity,
+        config: Config,
+        password: Option<super::auth::Password>,
+        transport: super::ServerTransport,
+    ) -> anyhow::Result<Self> {
         ensure!(
             password.is_some() || identity.verifies_clients(),
             "configure a password or client CA"
         );
+        let budget = std::sync::Arc::new(tokio::sync::Semaphore::new(config.max_connections.get()));
+        let endpoint = if transport != super::ServerTransport::Tls {
+            Some(super::socket::server_endpoint(
+                listen,
+                identity.clone().server()?,
+            )?)
+        } else {
+            None
+        };
+        let address = endpoint
+            .as_ref()
+            .map(Endpoint::local_addr)
+            .transpose()?
+            .unwrap_or(listen);
+        let tls = if transport != super::ServerTransport::Quic {
+            Some(super::TlsServer::bind_budget(
+                address,
+                identity,
+                config.clone(),
+                password.clone(),
+                budget.clone(),
+            )?)
+        } else {
+            None
+        };
         Ok(Self {
-            endpoint: super::socket::server_endpoint(listen, identity.server()?)?,
+            endpoint,
+            tls,
+            budget,
             config,
             password,
         })
@@ -54,11 +135,34 @@ impl TunnelServer {
 
     /// Return the listener address selected by the operating system.
     pub fn local_addr(&self) -> anyhow::Result<SocketAddr> {
-        Ok(self.endpoint.local_addr()?)
+        if let Some(endpoint) = &self.endpoint {
+            Ok(endpoint.local_addr()?)
+        } else {
+            self.tls.as_ref().expect("one listener").local_addr()
+        }
     }
 
     /// Accept bounded handshakes until cancellation and release all active connections.
-    pub async fn run(self, shutdown: CancellationToken) -> anyhow::Result<()> {
+    pub async fn run(mut self, shutdown: CancellationToken) -> anyhow::Result<()> {
+        let Some(tls) = self.tls.take() else {
+            return self.run_quic(shutdown).await;
+        };
+        if self.endpoint.is_none() {
+            return tls.run(shutdown).await;
+        }
+        let group = shutdown.child_token();
+        let quic = self.run_quic(group.clone());
+        let stream = tls.run(group.clone());
+        tokio::pin!(quic, stream);
+        tokio::select! {
+            result = &mut quic => { group.cancel(); let stopped = stream.await; result.and(stopped) },
+            result = &mut stream => { group.cancel(); let stopped = quic.await; result.and(stopped) },
+        }
+    }
+
+    /// Supervise the QUIC half independently when a server also exposes TCP/TLS.
+    async fn run_quic(self, shutdown: CancellationToken) -> anyhow::Result<()> {
+        let endpoint = self.endpoint.as_ref().expect("QUIC listener");
         let mut tasks = JoinSet::new();
         tracing::info!(listen = %self.local_addr()?, "authenticated QUIC tunnel listening");
         loop {
@@ -68,12 +172,14 @@ impl TunnelServer {
                 result = tasks.join_next(), if !tasks.is_empty() => {
                     if let Some(Err(error)) = result { tracing::warn!(%error, "tunnel task failed"); }
                 }
-                incoming = self.endpoint.accept() => {
+                incoming = endpoint.accept() => {
                     let Some(incoming) = incoming else { break; };
                     if tasks.len() >= self.config.max_connections.get() { incoming.refuse(); continue; }
+                    let Ok(permit) = self.budget.clone().try_acquire_owned() else { incoming.refuse(); continue; };
                     let config = self.config.clone();
                     let password = self.password.clone();
                     tasks.spawn(async move {
+                        let _permit = permit;
                         let result = async {
                             let connection = timeout(config.handshake_timeout, incoming).await
                                 .context("QUIC handshake deadline exceeded")?
@@ -86,10 +192,10 @@ impl TunnelServer {
                 }
             }
         }
-        self.endpoint.close(0u8.into(), b"server shutdown");
+        endpoint.close(0u8.into(), b"server shutdown");
         tasks.abort_all();
         while tasks.join_next().await.is_some() {}
-        timeout(self.config.shutdown_grace, self.endpoint.wait_idle())
+        timeout(self.config.shutdown_grace, endpoint.wait_idle())
             .await
             .ok();
         Ok(())

@@ -1,0 +1,4 @@
+transport: both
+password: replace-with-a-long-random-password
+cert: server.pem
+key: server.key

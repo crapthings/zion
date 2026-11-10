@@ -79,10 +79,13 @@ async fn oversized_datagram_preserves_association() {
             .unwrap();
     assert_eq!(&buffer[..length], b"valid after oversize");
     remote.send_to(b"reply", source).await.unwrap();
-    let response = tokio::time::timeout(Duration::from_secs(2), session.guard.0.read_datagram())
-        .await
-        .unwrap()
-        .unwrap();
+    let response = tokio::time::timeout(
+        Duration::from_secs(2),
+        session.guard.as_ref().unwrap().0.read_datagram(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let mut expected = header;
     expected.extend_from_slice(b"reply");
     assert_eq!(&response[..], &expected);
@@ -205,7 +208,7 @@ async fn acknowledgement_rejects_peer_stop_code() {
 #[tokio::test]
 async fn acknowledgement_accepts_finished_stream() {
     let mut peer = Peer::open().await;
-    peer.session.io.writer_mut().finish().unwrap();
+    peer.session.io.quic_writer_mut().unwrap().finish().unwrap();
     tokio::time::timeout(Duration::from_secs(2), peer.receive.read_to_end(1))
         .await
         .unwrap()
@@ -221,9 +224,12 @@ async fn acknowledgement_accepts_finished_stream() {
 async fn datagram_reports_closed_connection() {
     let peer = Peer::open().await;
     peer.connection.close(7u8.into(), b"test shutdown");
-    tokio::time::timeout(Duration::from_secs(2), peer.session.guard.0.closed())
-        .await
-        .unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        peer.session.guard.as_ref().unwrap().0.closed(),
+    )
+    .await
+    .unwrap();
     let error = peer
         .session
         .send_datagram(bytes::Bytes::from_static(b"packet"))
@@ -259,14 +265,14 @@ async fn drained_server_waits_for_client_close() {
         .tcp(&TargetAddr::Ip(address), Duration::from_secs(2))
         .await
         .unwrap();
-    session.io.writer_mut().finish().unwrap();
+    session.io.quic_writer_mut().unwrap().finish().unwrap();
     timeout(Duration::from_secs(2), completion)
         .await
         .unwrap()
         .unwrap();
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert!(
-        session.guard.0.close_reason().is_none(),
+        session.guard.as_ref().unwrap().0.close_reason().is_none(),
         "server closed before client consumed the response"
     );
     let mut response = Vec::new();
@@ -437,10 +443,13 @@ async fn dual_udp_echo(client: &zion::tunnel::Client) {
     tokio::join!(echo(v4), echo(v6));
     let mut received = std::collections::HashSet::new();
     for _ in 0..2 {
-        let packet = timeout(Duration::from_secs(3), session.guard.0.read_datagram())
-            .await
-            .unwrap()
-            .unwrap();
+        let packet = timeout(
+            Duration::from_secs(3),
+            session.guard.as_ref().unwrap().0.read_datagram(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let (fragment, source, payload) = parse_udp_request(&packet).await.unwrap();
         assert_eq!(fragment, 0);
         let index = payload[0] as usize;
@@ -505,7 +514,7 @@ async fn quic_address_racing_bypasses_blackholes_in_either_family() {
             .unwrap()
             .unwrap();
         assert_eq!(
-            session.guard.0.remote_address().is_ipv4(),
+            session.guard.as_ref().unwrap().0.remote_address().is_ipv4(),
             tunnel.address.is_ipv4()
         );
         assert!(started.elapsed() < Duration::from_secs(3));

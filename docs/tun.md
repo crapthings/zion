@@ -10,7 +10,7 @@ This is a library adapter and a foreground CLI entry point. The app's privileged
 cargo build --locked --release --features tun-device
 ```
 
-Use the existing client JSON/YAML, including an explicit physical outbound `interface`, such as `en0` on macOS or `eth0` on Linux. This binds the QUIC sockets to that device. Server resolution and authentication happen before creating TUN.
+Use the existing client JSON/YAML, including an explicit physical outbound `interface`, such as `en0` on macOS or `eth0` on Linux. This binds the selected QUIC or TCP/TLS carrier to that device. Server resolution and authentication happen before creating TUN.
 
 With the platform's TUN permissions:
 
@@ -32,7 +32,7 @@ Stop with Ctrl-C. The pump stops the packet engine and releases its device handl
 - tun-rs handles the macOS utun header. The packet engine receives raw IPv4/IPv6 packets.
 - `forward` uses the engine's MTU and bounded queues. Invalid, oversized, or queue-rejected input is dropped. Short device writes and I/O failures stop forwarding; partial packets are not retried as separate writes.
 
-ICMP and IP fragments remain unsupported. Large UDP datagrams are not automatically fragmented to fit QUIC.
+ICMP and IP fragments remain unsupported. Large UDP datagrams are not automatically fragmented to fit QUIC or the virtual MTU.
 
 ## Verification
 

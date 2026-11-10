@@ -7,6 +7,14 @@ zion client -c client.yaml
 zion server -c server.yaml
 ```
 
+## Transport
+
+`transport: quic` (default) carries sessions over UDP. `transport: tls` uses TCP with TLS 1.3 and works without UDP connectivity to the server. Both can forward TCP and UDP destinations. The aliases `udp` and `tcp` select `quic` and `tls` respectively.
+
+A server may use `transport: both` to listen on TCP and UDP at the same numeric port. Open both firewall protocols. Clients select one carrier; there is no automatic fallback. UDP over TCP retains packet boundaries but shares TCP retransmission delays.
+
+The inline CLI also accepts `--transport quic|tls`, or `--transport both` for a server. File-based configuration uses the `transport` field instead.
+
 ## Authentication
 
 For password authentication, use the same password on both sides:
@@ -49,13 +57,14 @@ On the client, `ca` trusts the server. On the server, `ca` requires trusted clie
 
 | Field | Client | Server |
 | --- | --- | --- |
+| `transport` | `quic` or `tls`; defaults to `quic` | `quic`, `tls`, or `both`; defaults to `quic` |
 | `server` | Required `host:port` or `[IPv6]:port` | — |
 | `password` | Shared secret | Shared secret |
 | `cert`, `key` | Optional client identity; supply together | Required TLS identity |
 | `ca` | Server trust roots; defaults to public roots | Client trust roots; enables certificate authentication |
 | `listen` | `127.0.0.1:1080`; loopback only | `[::]:8443`; dual stack |
 | `server_name` | Certificate name; defaults to the server host or IP | — |
-| `interface` | Bind QUIC sockets to an outbound interface | — |
+| `interface` | Bind carrier sockets to an outbound interface | — |
 | `dns` | — | Resolver IP list; defaults to system resolution |
 
 To connect by IP while verifying a DNS name:

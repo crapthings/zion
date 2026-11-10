@@ -48,7 +48,7 @@ impl Channel {
     async fn receive(&self, buffer: &mut [u8]) -> anyhow::Result<Bytes> {
         match self {
             Self::Direct(outbound) => outbound.receive(buffer).await,
-            Self::Tunnel(session) => Ok(session.guard.0.read_datagram().await?),
+            Self::Tunnel(session) => Ok(session.receive_datagram().await?),
         }
     }
 }

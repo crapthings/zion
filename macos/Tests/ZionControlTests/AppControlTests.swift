@@ -16,8 +16,9 @@ import Testing
     var onLog: (@MainActor (String) -> Void)?
     var onExit: (@MainActor (Int32) -> Void)?
     var starts = 0
+    var transport: TunnelTransport?
     func start(configuration: CoreConfiguration) async throws -> ProxyEndpoint {
-        starts += 1; return try ProxyEndpoint(listen: "127.0.0.1:18080")
+        starts += 1; transport = configuration.transport; return try ProxyEndpoint(listen: "127.0.0.1:18080")
     }
     func stop() async {}
 }
@@ -191,6 +192,28 @@ import Testing
         app.finishSetup()
         #expect(app.connection.phase.connected && engine.starts == 1)
         #expect(await app.connection.disconnect())
+    }
+
+    /// Carrier changes preserve Keychain identity and are rejected while a connection is active.
+    @Test func profileTransportSelectionPreservesIdentityAndSecrets() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let secrets = CommandSecrets(); let engine = CommandEngine(); let app = model(directory, secrets, engine)
+        let config = #"{"server":"passage.example.com:8443","password":"secret","transport":"tcp"}"#
+        #expect(try await call(app, "profiles.import", ["name":"Test", "config":config])["ok"] as? Bool == true)
+        let id = try #require(app.document.selectedID)
+        #expect(app.document.profiles[0].transport == .tls)
+        #expect(try await call(app, "profiles.transport", ["id":id.uuidString,"transport":"quic"])["ok"] as? Bool == true)
+        #expect(app.document.profiles[0].transport == .quic && secrets.values[id] == "secret")
+        #expect(try await call(app, "profiles.transport", ["id":id.uuidString,"transport":"tls"])["ok"] as? Bool == true)
+        #expect(try await call(app, "connect")["ok"] as? Bool == true)
+        #expect(engine.transport == .tls)
+        let busy = try await call(app, "profiles.transport", ["id":id.uuidString,"transport":"quic"])
+        #expect((busy["error"] as? [String:String])?["code"] == "busy")
+        var edited = app.document.profiles[0]; edited.transport = .quic
+        #expect(throws: (any Error).self) { try app.save(edited,password:"other") }
+        #expect(app.document.profiles[0].transport == .tls && secrets.values.count == 1 && secrets.values[id] == "secret")
+        #expect(try await call(app,"disconnect")["ok"] as? Bool == true)
     }
 
     /// A real Rust CLI reaches the Swift socket without launching the GUI or writing system settings.

@@ -443,7 +443,7 @@ async fn server_configuration_applies_dns_to_tcp_and_udp_with_shared_cache() {
             .unwrap();
         assert_eq!(&buffer[..size], b"custom DNS UDP");
         udp.send_to(&buffer[..size], peer).await.unwrap();
-        let response = timeout(Duration::from_secs(3), session.guard.0.read_datagram())
+        let response = timeout(Duration::from_secs(3), session.receive_datagram())
             .await
             .unwrap()
             .unwrap();

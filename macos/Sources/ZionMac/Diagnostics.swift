@@ -14,7 +14,7 @@ extension AppModel {
     var diagnosticFields: [DiagnosticField] {
         [DiagnosticField(label: "状态", value: connection.statusTitle),
          DiagnosticField(label: "接管方式", value: connection.selectedBackend.title),
-         DiagnosticField(label: "服务器", value: selectedProfile?.server ?? "尚未选择"),
+         DiagnosticField(label: "服务器", value: selectedProfile.map { $0.server + " · " + $0.transport.title } ?? "尚未选择"),
          DiagnosticField(label: "本地监听", value: connection.endpoint?.description ?? "未运行"),
          DiagnosticField(label: "出口网卡", value: selectedProfile?.interface.nilIfEmpty ?? "系统路由"),
          DiagnosticField(label: "网络恢复", value: connection.needsRecovery ? "需要恢复" : "无待处理恢复")]

@@ -22,7 +22,7 @@ Local packaging defaults to ad hoc signing. Set `ZION_CODESIGN_IDENTITY` to an i
 
 ## Shared packet engine
 
-The `packet-tunnel` Cargo feature uses netstack-smoltcp to turn raw IPv4/IPv6 TCP and UDP packets into Zion QUIC sessions. It authenticates before reporting readiness and uses bounded queues with a shared TCP/UDP session budget.
+The `packet-tunnel` Cargo feature uses netstack-smoltcp to turn raw IPv4/IPv6 TCP and UDP packets into Zion sessions over the configured QUIC or TCP/TLS carrier. It authenticates before reporting readiness and uses bounded queues with a shared TCP/UDP session budget.
 
 The packet engine does not create interfaces or configure routes and DNS. The optional `tun-device` feature adds a tun-rs adapter and a foreground CLI for macOS/Linux; see [TUN transport](tun.md). NetworkExtension `packetFlow` and helper-to-app device handoff remain unimplemented.
 

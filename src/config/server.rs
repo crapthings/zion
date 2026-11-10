@@ -15,6 +15,8 @@ use std::{
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerConfig {
+    #[serde(default)]
+    pub transport: crate::tunnel::ServerTransport,
     pub cert: PathBuf,
     pub key: PathBuf,
     pub password: Option<Password>,
@@ -50,7 +52,7 @@ impl ServerConfig {
         Ok(())
     }
 
-    /// Build an authenticated QUIC server using the selected trust and password policy.
+    /// Build the selected authenticated listeners with a shared resolver and admission policy.
     pub fn build(self) -> anyhow::Result<TunnelServer> {
         self.validate()?;
         let identity = Identity::server_from_files(&self.cert, &self.key, self.ca.as_deref())?;
@@ -64,6 +66,6 @@ impl ServerConfig {
                 .unwrap_or_default(),
             ..Config::default()
         };
-        TunnelServer::bind_with_password(self.listen, identity, config, self.password)
+        TunnelServer::bind_transport(self.listen, identity, config, self.password, self.transport)
     }
 }

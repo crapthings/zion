@@ -93,7 +93,7 @@ async fn session(
                     expires = Instant::now() + idle;
                 }
             }
-            response = session.guard.0.read_datagram() => {
+            response = session.receive_datagram() => {
                 let frame = response?;
                 let (fragment, remote, payload) = parse_udp_request(&frame).await?;
                 if fragment == 0 && remote == TargetAddr::Ip(destination) {

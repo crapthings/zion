@@ -1,0 +1,3 @@
+server: proxy.example.com:8443
+transport: tls
+password: replace-with-a-long-random-password

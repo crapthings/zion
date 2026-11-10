@@ -157,6 +157,14 @@ impl Identity {
 
     /// Configure a client that validates the server and presents its own certificate.
     pub fn client(self) -> anyhow::Result<quinn::ClientConfig> {
+        let tls = self.client_tls(ALPN)?;
+        let mut config = quinn::ClientConfig::new(Arc::new(QuicClientConfig::try_from(tls)?));
+        config.transport_config(Arc::new(transport()));
+        Ok(config)
+    }
+
+    /// Build shared TLS 1.3 client verification with a transport-specific ALPN.
+    pub fn client_tls(self, alpn: &[u8]) -> anyhow::Result<rustls::ClientConfig> {
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let builder = rustls::ClientConfig::builder_with_provider(provider)
             .with_protocol_versions(&[&rustls::version::TLS13])?
@@ -165,15 +173,22 @@ impl Identity {
             Some(key) => builder.with_client_auth_cert(self.certificates, key)?,
             None => builder.with_no_client_auth(),
         };
-        tls.alpn_protocols = vec![ALPN.to_vec()];
+        tls.alpn_protocols = vec![alpn.to_vec()];
         tls.enable_early_data = false;
-        let mut config = quinn::ClientConfig::new(Arc::new(QuicClientConfig::try_from(tls)?));
-        config.transport_config(Arc::new(transport()));
-        Ok(config)
+        Ok(tls)
     }
 
     /// Configure a server that requires a client certificate signed by its trusted CA.
     pub fn server(self) -> anyhow::Result<quinn::ServerConfig> {
+        let tls = self.server_tls(ALPN)?;
+        let mut config =
+            quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(tls)?));
+        config.transport_config(Arc::new(transport()));
+        Ok(config)
+    }
+
+    /// Build shared TLS 1.3 server authentication with a transport-specific ALPN.
+    pub fn server_tls(self, alpn: &[u8]) -> anyhow::Result<rustls::ServerConfig> {
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let builder = rustls::ServerConfig::builder_with_provider(provider.clone())
             .with_protocol_versions(&[&rustls::version::TLS13])?;
@@ -191,12 +206,20 @@ impl Identity {
             self.certificates,
             self.key.context("missing server private key")?,
         )?;
-        tls.alpn_protocols = vec![ALPN.to_vec()];
+        tls.alpn_protocols = vec![alpn.to_vec()];
         tls.max_early_data_size = 0;
-        let mut config =
-            quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(tls)?));
-        config.transport_config(Arc::new(transport()));
-        Ok(config)
+        Ok(tls)
+    }
+}
+
+/// Identity cloning duplicates key storage only when a server explicitly enables both listeners.
+impl Clone for Identity {
+    fn clone(&self) -> Self {
+        Self {
+            certificates: self.certificates.clone(),
+            key: self.key.as_ref().map(PrivateKeyDer::clone_key),
+            roots: self.roots.clone(),
+        }
     }
 }
 

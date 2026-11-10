@@ -1,6 +1,6 @@
 # IPv4 and IPv6
 
-The local SOCKS listener, QUIC transport, and destination each choose their address family independently. An IPv4 tunnel can carry IPv6 destinations, and vice versa. The server still needs a working route for each destination family.
+The local SOCKS listener, QUIC or TCP/TLS carrier, and destination each choose their address family independently. An IPv4 tunnel can carry IPv6 destinations, and vice versa. The server still needs a working route for each destination family.
 
 ## Listeners
 
@@ -16,9 +16,9 @@ The SOCKS listener binds one loopback address, defaulting to `127.0.0.1:1080`; `
 
 ## Address selection
 
-DNS candidates are deduplicated and interleaved by family, with up to eight addresses per family. QUIC handshakes and destination TCP connections start alternatives at 250 ms intervals, or sooner when all current attempts fail.
+DNS candidates are deduplicated and interleaved by family, with up to eight addresses per family. QUIC handshakes, TCP/TLS handshakes, and destination TCP connections start alternatives at 250 ms intervals, or sooner when all current attempts fail.
 
-Only the winning verified QUIC connection receives the operation. Losing attempts are cancelled; authentication failure does not trigger a weaker mode. An explicit outbound interface applies to both families. IPv4-mapped IPv6 addresses are normalized to IPv4.
+Only the winning verified carrier connection receives the operation. Losing attempts are cancelled; authentication failure does not trigger a weaker mode. An explicit outbound interface applies to both families. IPv4-mapped IPv6 addresses are normalized to IPv4.
 
 The client resolves the server name when building its configuration. Running clients do not refresh that candidate set or migrate established sessions. This is staggered connection racing, not a complete RFC 8305 implementation. Server-side destination resolution can use the separate [custom DNS policy](dns.md).
 
@@ -30,6 +30,6 @@ A successful local send gives no delivery confirmation. Silent packet loss does 
 
 ## Coverage
 
-Loopback tests cover both QUIC transport families, mixed-family TCP/UDP destinations, address racing, cancellation, and unavailable-family fallback. These tests do not establish public IPv6 reachability on a deployment network.
+Loopback tests cover both carrier address families, mixed-family TCP/UDP destinations, address racing, cancellation, and unavailable-family fallback. These tests do not establish public IPv6 reachability on a deployment network.
 
 System-wide route capture remains unfinished; see [backends](backends.md).

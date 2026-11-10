@@ -18,6 +18,8 @@ use tokio::{net::lookup_host, time::timeout};
 #[serde(deny_unknown_fields)]
 pub struct ClientConfig {
     pub server: String,
+    #[serde(default)]
+    pub transport: crate::tunnel::Transport,
     pub password: Option<Password>,
     pub ca: Option<PathBuf>,
     pub cert: Option<PathBuf>,
@@ -89,12 +91,13 @@ impl ClientConfig {
             .await
             .context("server DNS lookup timed out")??
             .collect::<Vec<_>>();
-        let tunnel = Client::with_addresses(
+        let tunnel = Client::with_transport(
             remotes,
             self.server_name.unwrap_or(host),
             identity,
             self.interface.as_deref(),
             self.password,
+            self.transport,
         )?;
         Ok(Config {
             tunnel: Some(tunnel),

@@ -40,6 +40,7 @@ private struct CoreEvent: Decodable {
             throw ControlError("没有找到可执行的代理核心，请使用完整的 Zion.app。")
         }
         sanitizer = DiagnosticSanitizer(password: configuration.password)
+        onLog?("隧道传输：" + configuration.transport.title)
         let data = try JSONEncoder().encode(configuration)
         let token = UUID()
         generation = token

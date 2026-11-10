@@ -237,7 +237,7 @@ import Testing
         let server = Process(), diagnostics = Pipe()
         let capture = ServerLog()
         server.executableURL = URL(fileURLWithPath: binary)
-        server.arguments = ["server", "--listen", "127.0.0.1:0", "--credentials", identity.path]
+        server.arguments = ["server", "--transport", "both", "--listen", "127.0.0.1:0", "--credentials", identity.path]
         server.standardOutput = FileHandle.nullDevice
         server.standardError = diagnostics
         var environment = ProcessInfo.processInfo.environment
@@ -264,34 +264,37 @@ import Testing
         profile.ca = identity.appendingPathComponent("ca.pem").path
         profile.certificate = identity.appendingPathComponent("client.pem").path
         profile.privateKey = identity.appendingPathComponent("client.key").path
-        let engine = CoreProcess(executable: URL(fileURLWithPath: binary))
-        do {
-            let endpoint = try await engine.start(configuration: profile.configuration(password: nil))
-            #expect(endpoint.host == "127.0.0.1")
-            #expect(endpoint.port > 0)
-        } catch {
-            await engine.stop()
-            throw error
-        }
-        await engine.stop()
-        if NativePacketEngine.isLinked {
-            let payload = try PacketConfiguration(client: profile.configuration(password: nil)).encoded()
-            let native = NativePacketEngine()
-            var exits = 0
-            native.onExit = { _ in exits += 1 }
-            try await native.start(payload: payload, onPacket: { _ in })
-            #expect(!native.send(Data([0])))
+        for transport in TunnelTransport.allCases {
+            profile.transport = transport
+            let engine = CoreProcess(executable: URL(fileURLWithPath: binary))
             do {
+                let endpoint = try await engine.start(configuration: profile.configuration(password: nil))
+                #expect(endpoint.host == "127.0.0.1")
+                #expect(endpoint.port > 0)
+            } catch {
+                await engine.stop()
+                throw error
+            }
+            await engine.stop()
+            if NativePacketEngine.isLinked {
+                let payload = try PacketConfiguration(client: profile.configuration(password: nil)).encoded()
+                let native = NativePacketEngine()
+                var exits = 0
+                native.onExit = { _ in exits += 1 }
                 try await native.start(payload: payload, onPacket: { _ in })
-                Issue.record("running native engine accepted a second start")
-            } catch {}
+                #expect(!native.send(Data([0])))
+                do {
+                    try await native.start(payload: payload, onPacket: { _ in })
+                    Issue.record("running native engine accepted a second start")
+                } catch {}
 
-            async let firstStop: Void = native.stop()
-            async let secondStop: Void = native.stop()
-            _ = await (firstStop, secondStop)
-            try await native.start(payload: payload, onPacket: { _ in })
-            await native.stop()
-            #expect(exits == 0)
+                async let firstStop: Void = native.stop()
+                async let secondStop: Void = native.stop()
+                _ = await (firstStop, secondStop)
+                try await native.start(payload: payload, onPacket: { _ in })
+                await native.stop()
+                #expect(exits == 0)
+            }
         }
     }
 

@@ -173,3 +173,17 @@ fn component_install_is_a_separate_command() {
         json!({"version":1,"command":"component.install","arguments":{}})
     );
 }
+
+/// Carrier selection updates a profile by ID while leaving authentication data out of the request.
+#[test]
+fn profile_carrier_command_uses_canonical_transport() {
+    let (output, request) = call(
+        &["profile", "transport", "example-id", "tcp"],
+        json!({"version":1,"ok":true,"result":{}}),
+    );
+    assert!(output.status.success());
+    assert_eq!(
+        request,
+        json!({"version":1,"command":"profiles.transport","arguments":{"id":"example-id","transport":"tls"}})
+    );
+}

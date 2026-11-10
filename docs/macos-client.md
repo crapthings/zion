@@ -55,7 +55,7 @@ Configuration is sent as JSON through stdin, then the pipe is closed. Stdout car
 {"event":"stopped"}
 ```
 
-Startup failure emits `{"event":"error","message":"..."}` and exits unsuccessfully. The core binds a random loopback port and authenticates a real QUIC session before reporting ready. This is a startup probe, not ongoing health monitoring.
+Startup failure emits `{"event":"error","message":"..."}` and exits unsuccessfully. The core binds a random loopback port and authenticates a real session over the selected QUIC or TCP/TLS carrier before reporting ready. This is a startup probe, not ongoing health monitoring.
 
 The controller validates the loopback address, bounds output buffering and startup time, and rejects callbacks from old processes. The Logs page shows connection state, the selected server and interface, the local listener, pending recovery, and the latest error. Session events include core output and connection or recovery failures. Search, severity filtering, follow-latest, clear, and copy-diagnostics are available.
 
@@ -81,4 +81,6 @@ The Helper TUN selection includes install, approval, refresh, and uninstall cont
 swift test --package-path macos
 ```
 
-Control tests use temporary files and substitute network settings, without writing system proxy preferences or Keychain. Optional real-core tests use a local QUIC server. They do not validate authorization dialogs, GUI layout, or live system-network takeover.
+Control tests use temporary files and substitute network settings, without writing system proxy preferences or Keychain. Optional real-core tests use a local server with both carriers. They do not validate authorization dialogs, GUI layout, or live system-network takeover.
+
+Profiles offer an explicit UDP/QUIC or TCP/TLS selector. Existing profiles default to QUIC; changing transport preserves the UUID and Keychain entry. JSON import accepts the same `transport` field as the core configuration.

@@ -34,17 +34,33 @@ impl Password {
         request: &Request,
     ) -> anyhow::Result<[u8; 32]> {
         let binding = binding(connection, request)?;
-        let tag = hmac::sign(&self.0, &binding);
-        Ok(tag.as_ref().try_into().expect("HMAC-SHA256 has 32 bytes"))
+        Ok(self.sign_binding(&binding))
     }
 
     /// Verify a request's proof without comparing secret bytes in application code.
     pub(crate) fn verify(&self, connection: &Connection, request: &Request) -> anyhow::Result<()> {
+        self.verify_binding(&binding(connection, request)?, request)
+    }
+
+    /// Sign an exporter value supplied by either verified TLS transport.
+    pub(crate) fn sign_binding(&self, binding: &[u8; 32]) -> [u8; 32] {
+        hmac::sign(&self.0, binding)
+            .as_ref()
+            .try_into()
+            .expect("HMAC-SHA256 has 32 bytes")
+    }
+
+    /// Verify a transport-derived exporter proof with Ring's constant-time verification API.
+    pub(crate) fn verify_binding(
+        &self,
+        binding: &[u8; 32],
+        request: &Request,
+    ) -> anyhow::Result<()> {
         let proof = request
             .auth
             .as_ref()
             .context("password authentication is required")?;
-        hmac::verify(&self.0, &binding(connection, request)?, proof)
+        hmac::verify(&self.0, binding, proof)
             .map_err(|_| anyhow::anyhow!("password authentication failed"))
     }
 }

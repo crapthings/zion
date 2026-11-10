@@ -8,7 +8,7 @@ Tokio keeps time. Quinn carries the streams. Rustls guards the crossing.
 
 ## Inside
 
-- TCP and UDP over authenticated QUIC, with IPv4 and IPv6 support.
+- TCP and UDP forwarding over UDP/QUIC or TCP/TLS, with IPv4 and IPv6 support.
 - Minimal JSON or YAML configuration, using passwords, client certificates, or both.
 - System DNS or explicit server-side resolvers, with shared TTL caches.
 - A SwiftUI macOS app with Keychain storage, system proxy controls, and a menu bar presence.
@@ -46,7 +46,9 @@ Run each on its respective host:
 ./target/release/zion client -c client.yaml
 ```
 
-The client listens on `127.0.0.1:1080`. Point a SOCKS5-capable application there. The server listens on `[::]:8443` by default and needs inbound UDP access; use `0.0.0.0:8443` on an IPv4-only host.
+The client listens on `127.0.0.1:1080`. Point a SOCKS5-capable application there. The server defaults to UDP/QUIC on `[::]:8443`; use `0.0.0.0:8443` on an IPv4-only host.
+
+Set `transport: tls` on both sides for TCP/TLS. A server with `transport: both` accepts both carriers on the same port; allow TCP and UDP in its firewall. Clients select one carrier explicitly.
 
 Server identity is always verified. The minimal example assumes a publicly trusted certificate matching the server name; for a private CA, add `ca: ca.pem` to the client. Certificate paths are relative to the configuration file.
 

@@ -18,10 +18,13 @@ Import accepts CLI client JSON/YAML and adds a new profile, selecting it immedia
 Use `-c -` for stdin JSON; credential paths then resolve from the working directory. Password arguments are intentionally absent. Keychain and network-settings authorization may still require user interaction.
 
 ```sh
+./target/release/zion app profile transport PROFILE_UUID tls
 ./target/release/zion app profile select PROFILE_UUID
 ./target/release/zion app profile remove PROFILE_UUID
 ./target/release/zion app backend systemProxy
 ```
+
+The transport command selects `quic` or `tls` (`udp` and `tcp` aliases are accepted), retaining the profile UUID and Keychain password. The selected profile’s transport appears in status.
 
 Profiles cannot change while connected, awaiting recovery, or being edited in the UI. Importing the same file again creates another profile. `networkExtension` and `helperTun` can be selected but remain unavailable for connection.
 
@@ -73,6 +76,7 @@ Requests are one JSON line of at most 64 KiB; responses are at most 256 KiB. Eig
 | `component.status`, `component.install`, `component.uninstall` | Empty object |
 | `logs.read` | `limit` (string integer, 1–100) |
 | `profiles.import` | `name`, `config` (client JSON encoded as a string) |
+| `profiles.transport` | `id` (UUID), `transport` (`quic` or `tls`) |
 | `profiles.select`, `profiles.remove` | `id` (UUID) |
 | `backend.select` | `backend` (`systemProxy`, `networkExtension`, `helperTun`) |
 

@@ -7,6 +7,7 @@ import ZionControl
 /// Import values mirror the existing JSON schema and keep imported passwords out of profile storage.
 private struct ImportedConfiguration: Decodable {
     let server: String
+    let transport: TunnelTransport?
     let password: String?
     let ca: String?
     let cert: String?
@@ -14,9 +15,23 @@ private struct ImportedConfiguration: Decodable {
     let serverName: String?
     let interface: String?
     enum CodingKeys: String, CodingKey {
-        case server, password, ca, cert, key, interface
+        case server, transport, password, ca, cert, key, interface
         case serverName = "server_name"
     }
+
+    /// Distinguish an omitted legacy carrier from an invalid explicit value such as null.
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        server = try values.decode(String.self, forKey: .server)
+        transport = values.contains(.transport) ? try values.decode(TunnelTransport.self, forKey: .transport) : nil
+        password = try values.decodeIfPresent(String.self, forKey: .password)
+        ca = try values.decodeIfPresent(String.self, forKey: .ca)
+        cert = try values.decodeIfPresent(String.self, forKey: .cert)
+        key = try values.decodeIfPresent(String.self, forKey: .key)
+        serverName = try values.decodeIfPresent(String.self, forKey: .serverName)
+        interface = try values.decodeIfPresent(String.self, forKey: .interface)
+    }
+
 }
 
 /// The application model coordinates profile storage, Keychain, and connection presentation.
@@ -82,7 +97,7 @@ private struct ImportedConfiguration: Decodable {
         } catch { alert = error.localizedDescription }
     }
 
-    var canConnect: Bool { !helperInstallation.busy && !storageError && preferencesReadable && connection.readiness(for: connection.selectedBackend).canConnect }
+    var canConnect: Bool { editing == nil && !helperInstallation.busy && !storageError && preferencesReadable && connection.readiness(for: connection.selectedBackend).canConnect }
 
     /// Allow component changes only after all network ownership and recovery have ended.
     var canManageComponents: Bool { !storageError && connection.phase.idle && !connection.needsRecovery && !helperInstallation.busy && editing == nil }
@@ -142,6 +157,7 @@ private struct ImportedConfiguration: Decodable {
 
     /// Save metadata and Keychain content while rolling back a failed metadata transaction.
     func save(_ profile: ServerProfile, password: String) throws {
+        guard connection.phase.idle, !connection.needsRecovery, !helperInstallation.busy else { throw ControlError("请先断开连接，再修改服务器配置。") }
         guard !storageError else { throw ControlError("服务器列表尚未恢复，请先检查现有配置文件。") }
         try profile.validate()
         if profile.authentication == .password && password.isEmpty { throw ControlError("请输入服务器密码。") }
@@ -189,7 +205,7 @@ private struct ImportedConfiguration: Decodable {
     /// Toggle the selected authenticated core and its owned system proxy settings.
     func toggle() async {
         if connection.phase.active || connection.phase.busy { _ = await connection.disconnect(); return }
-        guard !helperInstallation.busy else { return }
+        guard !helperInstallation.busy, editing == nil else { return }
         guard !storageError else { alert = "Profile storage or app ownership is unavailable."; return }
         guard preferencesReadable else { alert = "请先修复接管方式设置文件。"; return }
         guard let profile = selectedProfile else { edit(); return }
@@ -213,6 +229,7 @@ private struct ImportedConfiguration: Decodable {
             let value = try JSONDecoder().decode(ImportedConfiguration.self, from: data)
             var profile = ServerProfile()
             profile.name = URLComponents(string: "quic://\(value.server)")?.host ?? "导入的服务器"
+            profile.transport = value.transport ?? .quic
             profile.server = value.server
             profile.authentication = value.password == nil ? .certificate : .password
             profile.ca = resolve(value.ca, relativeTo: url)
@@ -255,6 +272,7 @@ extension AppModel {
             case "logs.read": allowed = ["limit"]
             case "profiles.import": allowed = ["name", "config"]
             case "profiles.select", "profiles.remove": allowed = ["id"]
+            case "profiles.transport": allowed = ["id", "transport"]
             case "backend.select": allowed = ["backend"]
             default: return controlFailure("unknown_command", "Unknown control command.")
             }
@@ -304,7 +322,7 @@ extension AppModel {
             guard let source = arguments["config"], let data = source.data(using: .utf8), data.count <= 64 * 1024,
                   let name = arguments["name"], !name.isEmpty, name.utf8.count <= 128, document.profiles.count < 64 else { throw AppCommandError("invalid_arguments", "Import requires name and JSON config.") }
             guard let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  Set(fields.keys).isSubset(of: ["server", "password", "ca", "cert", "key", "listen", "server_name", "interface"]) else {
+                  Set(fields.keys).isSubset(of: ["server", "transport", "password", "ca", "cert", "key", "listen", "server_name", "interface"]) else {
                 throw AppCommandError("invalid_arguments", "Unknown client configuration fields.")
             }
             let value: ImportedConfiguration
@@ -312,13 +330,25 @@ extension AppModel {
             catch { throw AppCommandError("invalid_arguments", "Invalid client configuration.") }
             guard value.password == nil || (1...1024).contains(value.password!.utf8.count) else { throw AppCommandError("invalid_arguments", "Password must contain 1 to 1024 bytes.") }
             var profile = ServerProfile()
-            profile.name = name; profile.server = value.server
+            profile.name = name; profile.server = value.server; profile.transport = value.transport ?? .quic
             profile.authentication = value.password == nil ? .certificate : .password
             profile.ca = value.ca ?? ""; profile.certificate = value.cert ?? ""; profile.privateKey = value.key ?? ""
             profile.serverName = value.serverName ?? ""; profile.interface = value.interface ?? ""
             guard profile.server.utf8.count <= 512, [profile.ca, profile.certificate, profile.privateKey, profile.serverName, profile.interface].allSatisfy({ $0.utf8.count <= 4096 }) else { throw AppCommandError("invalid_arguments", "Profile fields exceed size limits.") }
             try save(profile, password: value.password ?? "")
             return ["id": profile.id.uuidString]
+        case "profiles.transport":
+            try requireControlIdle()
+            guard let id = arguments["id"].flatMap(UUID.init(uuidString:)), let index = document.profiles.firstIndex(where: { $0.id == id }) else {
+                throw AppCommandError("not_found", "Profile ID was not found.")
+            }
+            guard let transport = arguments["transport"].flatMap(TunnelTransport.init(rawValue:)) else {
+                throw AppCommandError("invalid_arguments", "Transport must be quic or tls.")
+            }
+            var next = document; next.profiles[index].transport = transport
+            try store.save(next); document = next
+            append("隧道传输已更新：" + transport.title)
+            return ["id": id.uuidString, "transport": transport.rawValue]
         case "profiles.select", "profiles.remove":
             try requireControlIdle()
             guard let id = arguments["id"].flatMap(UUID.init(uuidString:)), let profile = document.profiles.first(where: { $0.id == id }) else {
@@ -382,7 +412,7 @@ extension AppModel {
         case .recoveryRequired: phase = "recovery_required"
         case .failed: phase = "failed"
         }
-        return ["phase": phase, "selected_backend": connection.selectedBackend.rawValue,
+        return ["phase": phase, "transport": selectedProfile?.transport.rawValue as Any? ?? NSNull(), "selected_backend": connection.selectedBackend.rawValue,
                 "active_backend": connection.activeBackend?.rawValue as Any? ?? NSNull(),
                 "selected_profile": document.selectedID?.uuidString as Any? ?? NSNull(),
                 "endpoint": connection.endpoint?.description as Any? ?? NSNull(),

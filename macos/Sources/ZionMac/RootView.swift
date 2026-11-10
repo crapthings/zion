@@ -100,7 +100,7 @@ private struct OverviewView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("当前服务器").font(.subheadline).foregroundStyle(.secondary)
                             Text(model.selectedProfile?.name ?? "尚未添加服务器").font(.title3.weight(.semibold))
-                            if let profile = model.selectedProfile { Text(profile.server).font(.callout).foregroundStyle(.secondary) }
+                            if let profile = model.selectedProfile { Text(profile.server + " · " + profile.transport.title).font(.callout).foregroundStyle(.secondary) }
                         }
                         Spacer()
                         if !model.document.profiles.isEmpty {
@@ -131,7 +131,7 @@ private struct ServerListView: View {
                 List(model.document.profiles) { profile in
                     HStack(spacing: 14) {
                         Image(systemName: "server.rack").font(.title2).foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 5) { Text(profile.name).font(.headline); Text(profile.server).font(.callout).foregroundStyle(.secondary) }
+                        VStack(alignment: .leading, spacing: 5) { Text(profile.name).font(.headline); Text(profile.server + " · " + profile.transport.title).font(.callout).foregroundStyle(.secondary) }
                         Spacer()
                         if profile.id == model.document.selectedID { Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor) }
                         Button("选择") { model.select(profile) }.disabled(!model.connection.phase.idle)

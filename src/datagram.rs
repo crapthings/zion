@@ -25,6 +25,7 @@ pub enum DropReason {
     SocketError,
     UnexpectedSource,
     NoClient,
+    Congested,
 }
 
 /// Outcome helpers record packet drops without treating them as transport failures.

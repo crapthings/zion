@@ -41,7 +41,7 @@ pub(super) fn client_endpoint(
     )?)
 }
 
-/// Bind an Apple UDP socket to its interface index for the selected address family.
+/// Bind an Apple socket to its interface index for the selected address family.
 #[cfg(target_vendor = "apple")]
 fn bind_interface(socket: &Socket, name: &str, ipv6: bool) -> anyhow::Result<()> {
     let index = nix::net::if_::if_nametoindex(name)?;
@@ -54,7 +54,7 @@ fn bind_interface(socket: &Socket, name: &str, ipv6: bool) -> anyhow::Result<()>
     Ok(())
 }
 
-/// Bind a Linux or Android UDP socket to the selected device using the native socket API.
+/// Bind a Linux or Android socket to the selected device using the native socket API.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn bind_interface(socket: &Socket, name: &str, _ipv6: bool) -> anyhow::Result<()> {
     socket.bind_device(Some(name.as_bytes()))?;
@@ -64,7 +64,7 @@ fn bind_interface(socket: &Socket, name: &str, _ipv6: bool) -> anyhow::Result<()
 /// Reject unsupported interface selection instead of silently using a different route.
 #[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
 fn bind_interface(_socket: &Socket, _name: &str, _ipv6: bool) -> anyhow::Result<()> {
-    anyhow::bail!("explicit QUIC egress interfaces are unsupported on this platform")
+    anyhow::bail!("explicit egress interfaces are unsupported on this platform")
 }
 
 /// Bind an authenticated server with explicit dual-stack support for an IPv6 wildcard.
@@ -80,4 +80,57 @@ pub(super) fn server_endpoint(
         socket,
         Arc::new(quinn::TokioRuntime),
     )?)
+}
+
+/// Connect a TCP carrier using the same explicit egress-interface policy as QUIC.
+pub(super) async fn client_tcp(
+    remote: SocketAddr,
+    interface: Option<&str>,
+) -> std::io::Result<tokio::net::TcpStream> {
+    let socket = Socket::new(
+        Domain::for_address(remote),
+        Type::STREAM,
+        Some(Protocol::TCP),
+    )?;
+    if let Some(interface) = interface {
+        if interface.is_empty() || interface.contains('\0') {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid network interface",
+            ));
+        }
+        bind_interface(&socket, interface, remote.is_ipv6()).map_err(std::io::Error::other)?;
+    }
+    socket.set_nonblocking(true)?;
+    let socket = tokio::net::TcpSocket::from_std_stream(socket.into());
+    let stream = socket.connect(remote).await?;
+    configure_tcp(&stream)?;
+    Ok(stream)
+}
+
+/// Bind a TCP listener with explicit dual-stack wildcard behavior and no port sharing.
+pub(super) fn tcp_listener(address: SocketAddr) -> std::io::Result<std::net::TcpListener> {
+    let socket = Socket::new(
+        Domain::for_address(address),
+        Type::STREAM,
+        Some(Protocol::TCP),
+    )?;
+    socket.set_reuse_address(true)?;
+    if address.is_ipv6() {
+        socket.set_only_v6(!address.ip().is_unspecified())?;
+    }
+    socket.set_nonblocking(true)?;
+    socket.bind(&address.into())?;
+    socket.listen(128)?;
+    Ok(socket.into())
+}
+
+/// Keep TCP carriers responsive through NAT idle periods without fabricating application traffic.
+pub(super) fn configure_tcp(stream: &tokio::net::TcpStream) -> std::io::Result<()> {
+    stream.set_nodelay(true)?;
+    socket2::SockRef::from(stream).set_tcp_keepalive(
+        &socket2::TcpKeepalive::new()
+            .with_time(std::time::Duration::from_secs(30))
+            .with_interval(std::time::Duration::from_secs(10)),
+    )
 }

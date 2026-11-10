@@ -70,6 +70,12 @@ enum ProfileCommand {
         #[arg(short, long)]
         config: PathBuf,
     },
+    /// Choose the carrier for a saved server without changing its credentials.
+    Transport {
+        id: String,
+        #[arg(value_enum)]
+        transport: crate::tunnel::Transport,
+    },
     /// Select a saved server by UUID.
     Select { id: String },
     /// Remove a server and its Keychain password by UUID.
@@ -112,6 +118,17 @@ fn request(options: &AppArgs) -> anyhow::Result<Zeroizing<Vec<u8>>> {
         }
         AppCommand::Profile { command } => match command {
             ProfileCommand::List => "profiles.list",
+            ProfileCommand::Transport { id, transport } => {
+                arguments.insert("id".into(), id.clone());
+                arguments.insert(
+                    "transport".into(),
+                    serde_json::to_value(transport)?
+                        .as_str()
+                        .expect("transport string")
+                        .into(),
+                );
+                "profiles.transport"
+            }
             ProfileCommand::Select { id } | ProfileCommand::Remove { id } => {
                 arguments.insert("id".into(), id.clone());
                 if matches!(command, ProfileCommand::Select { .. }) {

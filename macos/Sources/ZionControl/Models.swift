@@ -5,11 +5,28 @@ public enum Authentication: String, Codable, CaseIterable, Sendable {
     case password, certificate
 }
 
+/// A tunnel carrier chooses UDP/QUIC or TCP/TLS independently of the destination protocol.
+public enum TunnelTransport: String, Codable, CaseIterable, Sendable {
+    case quic, tls
+    public var title: String { self == .quic ? "UDP · QUIC" : "TCP · TLS" }
+
+    /// Accept protocol names and their network aliases while rejecting unknown carriers.
+    public init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer()
+        switch try value.decode(String.self) {
+        case "quic", "udp": self = .quic
+        case "tls", "tcp": self = .tls
+        default: throw DecodingError.dataCorruptedError(in: value, debugDescription: "Unknown tunnel transport")
+        }
+    }
+}
+
 /// A saved profile contains connection metadata while its password stays in Keychain.
 public struct ServerProfile: Identifiable, Codable, Equatable, Sendable {
     public var id = UUID()
     public var name = "新服务器"
     public var server = ""
+    public var transport = TunnelTransport.quic
     public var authentication = Authentication.password
     public var ca = ""
     public var certificate = ""
@@ -19,6 +36,27 @@ public struct ServerProfile: Identifiable, Codable, Equatable, Sendable {
 
     /// Create an empty profile for a user-supplied server.
     public init() {}
+
+    /// Stored fields retain their existing names while older profiles default to the QUIC carrier.
+    private enum CodingKeys: String, CodingKey {
+        case id, name, server, transport, authentication, ca, certificate, privateKey, serverName, interface
+    }
+
+    /// Decode older profiles without inventing a transport for an unrecognized explicit value.
+    public init(from decoder: Decoder) throws {
+        self.init()
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        server = try values.decode(String.self, forKey: .server)
+        transport = values.contains(.transport) ? try values.decode(TunnelTransport.self, forKey: .transport) : .quic
+        authentication = try values.decode(Authentication.self, forKey: .authentication)
+        ca = try values.decode(String.self, forKey: .ca)
+        certificate = try values.decode(String.self, forKey: .certificate)
+        privateKey = try values.decode(String.self, forKey: .privateKey)
+        serverName = try values.decode(String.self, forKey: .serverName)
+        interface = try values.decode(String.self, forKey: .interface)
+    }
 
     /// Validate editable fields without weakening TLS authentication.
     public func validate() throws {
@@ -44,7 +82,7 @@ public struct ServerProfile: Identifiable, Codable, Equatable, Sendable {
             throw ControlError("请为这个服务器设置密码。")
         }
         return CoreConfiguration(
-            server: server, password: authentication == .password ? password : nil,
+            server: server, transport: transport, password: authentication == .password ? password : nil,
             ca: ca.nilIfEmpty, cert: certificate.nilIfEmpty, key: privateKey.nilIfEmpty,
             serverName: serverName.nilIfEmpty, interface: interface.nilIfEmpty
         )
@@ -54,6 +92,7 @@ public struct ServerProfile: Identifiable, Codable, Equatable, Sendable {
 /// The core receives credentials through stdin and chooses an unused loopback listener port.
 public struct CoreConfiguration: Encodable, Sendable {
     public var server: String
+    public var transport = TunnelTransport.quic
     public var password: String?
     public var ca: String?
     public var cert: String?
@@ -64,7 +103,7 @@ public struct CoreConfiguration: Encodable, Sendable {
 
     /// Wire keys match the existing flat Rust JSON schema.
     enum CodingKeys: String, CodingKey {
-        case server, password, ca, cert, key, interface, listen
+        case server, transport, password, ca, cert, key, interface, listen
         case serverName = "server_name"
     }
 }
