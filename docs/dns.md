@@ -1,75 +1,46 @@
-# 服务端自定义 DNS
+# Server DNS
 
-服务端 JSON/YAML 支持一个可选字段 `dns`：
+Set `dns` in the server configuration to use explicit upstreams:
 
 ```yaml
 password: replace-with-a-long-random-password
 cert: server.pem
 key: server.key
-dns: ["1.1.1.1", "8.8.8.8"]
+dns: ["1.1.1.1", "2606:4700:4700::1111"]
 ```
 
-```sh
-zion server -c server.yaml
-```
+Omitting `dns`, or setting it to `null`, uses Tokio's system resolver. Custom resolution never falls back to the system resolver and does not change system DNS settings.
 
-省略 `dns`（或填写 JSON null）时继续使用 Tokio 的系统解析路径，系统负责其解析规则与缓存。自定义模式只使用配置中的上游，无需修改 Ubuntu 的 `/etc/resolv.conf`、systemd-resolved 或其他应用的 DNS。
+## Upstreams
 
-## 上游格式与选择
+Supply 1–8 IP addresses, optionally with ports: `127.0.0.1:5353` or `[::1]:5353`. Bare IPs use port 53. Empty lists, hostnames, URLs, unspecified or multicast addresses, and port zero are rejected.
 
-列表支持 1–8 个上游：
+Queries use ordinary UDP/TCP DNS. Truncated UDP responses can retry over TCP. DoH, DoT, and DoQ are not supported.
 
-- IPv4：`1.1.1.1`，默认端口 53。
-- IPv6：`2606:4700:4700::1111`，默认端口 53。
-- 自定义端口：`127.0.0.1:5353` 或 `[::1]:5353`。
+The last successful upstream is tried first; alternatives start after 50 ms, with at most two concurrent upstreams per record type. Transient failures do not cancel pending peers. NXDOMAIN or NODATA ends that record-type lookup. Ordering is not a strict priority policy.
 
-列表不能为空；域名上游、URL、0 端口、未指定地址和组播地址会拒绝。上游使用 IP，避免为了定位 DNS 服务再调用系统 DNS。首版使用普通 UDP/TCP DNS；DoT、DoH、DoQ 尚未接入，不接受这些协议的 URL。
+Custom mode ignores the system hosts file and search domains. Names are lowercased and made absolute; Hickory retains its built-in special-use name handling. IP literals bypass DNS.
 
-Zion 优先尝试组内最近成功的上游，50 ms 后可启动备选，每种记录查询最多并发两个上游。较快返回的 SERVFAIL 不会取消尚在等待的健康上游；可信 NXDOMAIN/NODATA 仍直接返回。列表不代表严格的优先级顺序，也不保证网络很差时能在总期限内依次试完所有上游。收到 UDP 截断或相关传输错误时可使用同一上游的 TCP 端口。
+## Cache and concurrency
 
-自定义模式不读取系统 hosts，不继承系统搜索域；普通域名规范化为绝对名称，直接向指定上游查询。Hickory 对 localhost 等特殊用途名称的内建处理仍然保留，这不是回退系统解析。IP 字面目标直接连接，不产生 DNS 查询。
+TCP and UDP sessions share one resolver policy per server instance. Hickory owns response caching; Zion coordinates pending work and transient failures.
 
-## 共享与缓存
+| State | Key | Limit |
+| --- | --- | --- |
+| Responses | Query name, type, class; partitioned by upstream | Default 8192-entry budget divided across upstreams |
+| Pending lookups | Normalized name | 128 distinct names |
+| Transient failures | Query and upstream | 1024 entries, 500 ms backoff |
 
-每次服务器构建创建一个解析策略，所有 TCP、UDP 会话通过 Arc 共享。独立创建的策略拥有独立缓存；重启服务或重新构建策略会创建新缓存，目前没有配置热更新和磁盘缓存。
+Lookups use hash indexes. A and AAAA are cached separately; destination ports are not part of the key. Positive TTLs are capped at one day, SOA-based negative TTLs at 60 seconds. Zero-TTL responses are not reused; CNAME chains follow the shortest applicable TTL. Entry limits are not byte limits.
 
-| 数据 | 索引与生命周期 |
-| --- | --- |
-| 正常及负响应 | Hickory 的 Moka `Cache<Query, Entry>`，按查询名称、类型、类别索引，按上游分区共享总容量 |
-| 正在进行的查询 | `HashMap<Name, Pending>`，按规范化域名合并 A/AAAA 的整组工作 |
-| 暂时性失败 | 独立 Moka 缓存，按查询键和上游索引做短暂退避 |
+Concurrent requests for the same name share A/AAAA work. Both record types run in parallel and are merged after both finish; either family's successful result can be used. Each type has a five-second deadline, and each upstream attempt has two seconds. Callers retain their own connection deadline. A caller leaving does not cancel shared work.
 
-缓存查找使用哈希索引，无需遍历全部条目。A 与 AAAA 分开缓存，业务目标端口不在 DNS 缓存键中；域名大小写和结尾的点统一处理。
+Caches are in memory and discarded when the policy is rebuilt. There is no stale-answer extension, disk cache, or live configuration reload.
 
-同一策略的响应缓存总容量目标为 8192 条，均分给配置的上游，正响应 TTL 最长一天，负响应 TTL 最长 60 秒，不提升原 TTL 下限。CNAME 链按库的最短有效期处理，TTL 为 0 不复用；NXDOMAIN 和 NODATA 使用上游 SOA 提供的负缓存寿命。它们与超时、SERVFAIL 等暂时性错误分开处理。
+## Scope
 
-暂时性错误只退避 500 ms，容量目标为 1024 条，并分别作用于各上游的 A、AAAA 查询；一族故障不会阻止另一族成功结果返回。响应容量以条目数计算，不是严格的总内存字节配额，较大的 DNS 响应会占用更多内存。
+This setting resolves destination names received by the server. The client still uses its own system resolver to locate the Zion server. A destination already supplied as an IP is not resolved again.
 
-## 并发与期限
+It does not intercept device-wide DNS, application DoH, or port 53 traffic. The QUIC tunnel is encrypted; ordinary DNS between the server and its upstream is not.
 
-同名并发请求共用一次双记录查询，不同名称可以并行。一个调用方超时或断开不会取消其他调用方需要的共享工作；即使所有等待者都离开，共享工作仍受固定期限约束，完成或取消时清理登记。
-
-每个策略最多允许 128 个不同名称的共享工作；超过时新名称请求会快速报错。每个记录类型使用 5 秒总期限，上游单次超时为 2 秒，并行查询 A 和 AAAA；调用方还受原有连接期限约束。该机制没有独立的 A/AAAA 流式返回，仍会等待两族查询完成或各自失败，再合并可用结果。
-
-所有配置上游都失败时返回错误，不自动调用系统 DNS，也不自动直连绕过隧道。负缓存、暂时性退避与资源限制避免连续相同请求反复发起无界查询；不会在失败后无限延长旧 DNS 结果的寿命。
-
-## 作用范围
-
-该字段控制的是服务端收到的目标域名，包括 TCP 目标和 SOCKS UDP 域名目标。客户端连接代理服务器域名时仍使用 Mac 自己的系统解析。
-
-应用如果已经在 Mac 上把域名解析成 IP，服务端不会重新解析该 IP。此功能也不接管本机 UDP/TCP 53、应用自有 DoH 或全局系统 DNS；增强模式仍待实现。普通 DNS 查询本身未加密，Mac 到 Zion 服务端的代理隧道加密与服务端到 DNS 上游的传输是两个独立部分。
-
-## 验证
-
-测试使用本地可控 UDP/TCP DNS 应答器和真实 QUIC 服务端，避免依赖公网 DNS 的答案与网络状态，覆盖：
-
-- IPv4/IPv6 上游与两族记录，JSON/YAML 校验，IP 字面地址绕过查询。
-- 大小写、尾点和不同业务端口的缓存命中，策略之间的缓存隔离。
-- TTL 到期、零 TTL、CNAME 最短 TTL、NXDOMAIN/NODATA 负缓存。
-- SERVFAIL 短暂退避、部分地址族失败与恢复、UDP 截断转 TCP、组内上游故障。
-- 同名并发合并、调用者取消、全部等待者离开、不同名称并发、待处理名称上限及登记清理。
-- 从服务器配置到真实 TCP/UDP 转发的解析策略共享，以及多个 UDP 会话复用同一份缓存。
-
-2026-11-10 最终检查：macOS Rust 83 项、测试服务器 Ubuntu Rust 82 项、Swift 14 项测试通过（Ubuntu 少一项 macOS 专属网卡测试）；其中包含 19 项 DNS 集成测试和 2 项登记资源管理单元测试。Rust 格式、全部 target 的 Clippy（警告视为错误）、release app 构建及签名结构校验均通过。
-
-Ubuntu 测试通过本机交叉编译的临时测试程序运行，没有在服务器安装编译工具链；远端临时测试目录已清理。本轮未更改服务器系统 DNS、hosts、路由或防火墙，没有使用浏览器、GUI 自动化或图片查看。
+Tests use local UDP/TCP responders for TTL expiry, negative caching, peer failures, concurrency, IPv6 upstreams, and resolver sharing across real QUIC sessions. Run `cargo test --locked --test dns`.

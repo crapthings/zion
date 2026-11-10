@@ -75,7 +75,7 @@ swift test --package-path macos
 
 Swift tests require macOS. Native engine integration tests need the linked Rust library and a built core; setup is documented in [backend integration](docs/backends.md).
 
-Further notes: [wire protocol](docs/protocol.md), [DNS](docs/dns.md), and [dual stack](docs/dual-stack.md). Detailed documentation is currently in Chinese.
+Further notes: [wire protocol](docs/protocol.md), [DNS](docs/dns.md), and [dual stack](docs/dual-stack.md).
 
 ## License
 

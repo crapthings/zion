@@ -1,71 +1,61 @@
 # Zion QUIC v1
 
-Zion v1 是基于 QUIC 的私有代理协议，不兼容 HTTP/3 或 MASQUE。Quinn 负责 QUIC，Rustls 负责 TLS 1.3 与证书验证；应用不自行实现密码算法。
+Zion uses a private QUIC protocol with ALPN `zion/1` and request version `1`. Quinn supplies QUIC; Rustls supplies TLS 1.3. It is not HTTP/3 or MASQUE. Early data and 0-RTT are disabled.
 
-## 身份与版本
+## Authentication
 
-客户端始终验证服务端证书与名称；服务端根据配置要求客户端证书、密码证明，或两者同时通过。客户端证书由配置的客户端 CA 验证用途与信任链；密码模式不要求客户端证书。ALPN 固定为 `zion/1`，控制请求中的 `version` 固定为 `1`。TLS early data 与 QUIC 0-RTT 不启用。
+Clients always verify the server certificate and name. Servers require a password proof, a trusted client certificate, or both, according to configuration. All authenticated clients have the same outbound permissions; there is no per-user policy or revocation interface.
 
-当前所有认证成功的客户端具有相同出站权限，不使用用户名，尚无按用户授权、证书吊销或客户端身份管理接口。
+The optional request field `auth` is a JSON array of 32 byte values. Certificate-only clients omit it. To calculate a password proof:
 
-## 会话建立
+1. Serialize `(version, operation)` as a Serde JSON tuple.
+2. Use those bytes as TLS exporter context with label `EXPORTER-zion-password-v1`, producing 32 bytes.
+3. Sign the exported bytes with HMAC-SHA256, using the shared password as the key.
 
-每个 QUIC 连接对应一个 SOCKS5 TCP 会话或 UDP association。客户端打开一个双向流，服务端最多允许一个双向流，不允许单向流。
+Ring verifies the proof before any destination connection or UDP association is opened. The password itself is not sent. Proofs are bound to the connection and operation. Authentication failure closes QUIC with application code `16`; certificate-only servers reject unexpected password proofs.
 
-控制消息由两字节网络字节序长度与 UTF-8 JSON 构成，长度为 `1..=4096`。长度上限在分配消息缓冲前检查，JSON 禁止未知顶层字段。
+## Control stream
 
-TCP 请求示例：
+Each QUIC connection carries one TCP session or UDP association, using one bidirectional stream and no unidirectional streams. Control frames contain a two-byte big-endian length followed by UTF-8 JSON. Length must be 1–4096 bytes; unknown top-level fields are rejected.
+
+Requests without password proofs:
 
 ```json
 {"version":1,"operation":{"Tcp":{"host":"example.com","port":443}}}
-```
-
-UDP 请求示例：
-
-```json
 {"version":1,"operation":"Udp"}
 ```
 
-服务端验证版本与目标后，返回状态与绑定地址：
+Response:
 
 ```json
 {"status":0,"bound":"127.0.0.1:12345"}
 ```
 
-`status` 使用 SOCKS5 reply code，`0` 表示成功。TCP 成功必须在目标连接建立之后返回；认证、版本或控制消息错误不会建立目标连接。客户端获得成功响应后才向本地 SOCKS5 应用确认成功。
+`status` uses SOCKS5 reply codes. TCP success is returned only after connecting to the destination. The local SOCKS client receives success after the tunnel response arrives.
 
 ## TCP
 
-控制消息之后，同一双向流承载原始 TCP 字节。任意方向 EOF 仅结束对应发送方向，反向仍可发送。正常结束时等待发送流得到确认，显式停止码视为错误；发送确认等待上限为 5 秒。客户端只有在读完 QUIC 响应并完成本地转发后才关闭连接，服务端在排空发送流后限时等待这个关闭事件；传输 ACK 本身不代表应用已经消费响应数据。
+After the response, the same stream carries raw bytes. EOF closes only that sending direction. Normal completion waits up to five seconds for send acknowledgement; explicit stop codes are errors.
+
+The client closes QUIC after reading the response stream and forwarding it locally. The server waits for that close after draining its send stream. A transport ACK alone does not establish local application consumption.
 
 ## UDP
 
-双向流在成功响应后保留为生命周期控制通道，不承载 UDP 载荷。数据走 QUIC Datagram，其内容复用 SOCKS5 UDP envelope：保留字段、FRAG、地址类型、目标地址、端口与载荷。只接受 `FRAG=0`。
+The bidirectional stream stays open as a lifecycle channel. Payloads use QUIC Datagrams containing the SOCKS5 UDP envelope: reserved bytes, fragment byte, address type, destination, port, and payload. Only `FRAG=0` is accepted.
 
-每条连接只有一个 association，因此不需要额外 session ID；后续若引入跨会话连接复用，必须通过新协议版本或显式协商演进，不能直接改变 v1 格式。
+Each connection has one association and needs no session ID. The server accepts responses only from addresses to which it successfully sent a request. Oversized or malformed packets are dropped. There is no application retransmission, fragmentation, or reassembly.
 
-服务端使用独立 UDP socket 转发，仅接受已成功发送过请求的远端地址响应。Datagram 无送达保证、无应用层重传或分片；超出 Quinn 当前最大 datagram 大小的消息丢弃。
+A closed control stream, closed QUIC connection, or application idle timeout releases the association. Fatal transport errors end it; individual DNS or socket-send failures drop the affected packet.
 
-## 清理与限制
+## Defaults
 
-- 本地 TCP 控制连接关闭、QUIC 连接关闭或 UDP 空闲超时都会释放 association。
-- 本地默认最多 256 个会话，服务端默认最多 256 个握手或已建立会话。
-- 每会话最多 256 个 UDP 目标；QUIC Datagram 收、发缓冲上限分别为 256 KiB。
-- QUIC keepalive 间隔为 15 秒，传输空闲超时为 45 秒；它与应用 UDP 空闲超时分别生效。
-- QUIC 连接失败不会自动改为直连，活动连接不支持在 QUIC 和 TCP 之间迁移。
+| Resource | Limit |
+| --- | --- |
+| Local sessions | 256 |
+| Server handshakes and sessions combined | 256 |
+| UDP destinations per association | 256 |
+| QUIC Datagram receive / send buffers | 256 KiB each |
+| QUIC keepalive / transport idle timeout | 15 s / 45 s |
+| Application UDP idle timeout | 60 s |
 
-
-## 发送结果与诊断
-
-UDP 发送显式区分 `Sent`、按原因分类的 `Dropped` 与致命传输错误。过大数据报、畸形 envelope、分片、DNS 失败、目标数量上限、地址族不可用和 socket 发送失败属于单包丢弃；QUIC 连接失效或 Datagrams 能力错误会终止 association。客户端与服务端共享这套结果分类，debug 日志输出方向和原因，不输出数据载荷。
-
-客户端可选择出口网卡，作用范围仅为本地 QUIC UDP socket；这不会改变线上协议格式，也不会绕过 TLS 验证。指定的出口不可用时必须报错，不能回退到未经选择的路由。
-
-
-## 密码认证扩展
-
-请求可携带可选的 `auth` 字段，编码为 32 字节整数数组；不使用密码的证书客户端省略该字段，保留既有 v1 请求格式。
-
-使用当前连接的 TLS exporter 导出 32 字节绑定值，label 为 `EXPORTER-zion-password-v1`，context 为 Serde JSON 序列化的 `(version, operation)` 元组。随后由 Ring 使用共享密码作为 HMAC-SHA256 密钥对绑定值签名。服务端通过 Ring 的校验 API验证证明，验证完成前不建立目标连接或 UDP association。原始密码不进入请求报文。
-
-绑定值同时依赖 TLS 连接与命令，其他连接上的捕获证明不能重放；TLS early data 仍禁用。认证失败以应用错误码 `16` 关闭连接。仅配置客户端 CA 的服务器拒绝意外提供的密码证明；配置了密码和客户端 CA 的服务器要求两个因素都通过。
+Connections are not pooled across sessions. Tunnel failure does not fall back to direct access or a TCP transport.
