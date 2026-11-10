@@ -12,7 +12,7 @@ Tokio keeps time. Quinn carries the streams. Rustls guards the crossing.
 - Minimal JSON or YAML configuration, using passwords, client certificates, or both.
 - System DNS or explicit server-side resolvers, with shared TTL caches.
 - A SwiftUI macOS app with Keychain storage, system proxy controls, and a menu bar presence.
-- An optional shared IP packet engine for future system integration.
+- An optional IP packet engine with a tun-rs device adapter for macOS and Linux.
 
 Zion is young. The system proxy works today; NetworkExtension and helper-based TUN are selectable in the interface, but their system adapters are still unfinished. Full-device traffic capture is not yet available.
 
@@ -68,14 +68,14 @@ Manage servers and connections through the [app control CLI](docs/cli.md), or re
 
 ```sh
 cargo fmt --check
-cargo clippy --locked --all-targets --features packet-tunnel -- -D warnings
-cargo test --locked --features packet-tunnel
+cargo clippy --locked --all-targets --features tun-device -- -D warnings
+cargo test --locked --features tun-device
 swift test --package-path macos
 ```
 
 Swift tests require macOS. Native engine integration tests need the linked Rust library and a built core; setup is documented in [backend integration](docs/backends.md).
 
-Further notes: [wire protocol](docs/protocol.md), [DNS](docs/dns.md), and [dual stack](docs/dual-stack.md).
+Further notes: [wire protocol](docs/protocol.md), [DNS](docs/dns.md), and [dual stack](docs/dual-stack.md), and [TUN transport](docs/tun.md).
 
 ## License
 

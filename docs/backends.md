@@ -6,7 +6,7 @@ The app stores one selected backend and allows switching while disconnected and 
 | --- | --- |
 | System proxy | Connected to the Rust SOCKS core and macOS settings controller |
 | NetworkExtension | Selection only; provider, activation, and deployment are missing |
-| Helper TUN | Bundled helper with app-managed registration and read-only IPC; utun, routing, and DNS management are missing |
+| Helper TUN | Bundled helper with registration and read-only IPC; Rust device transport exists, but app handoff, routing, and DNS are missing |
 
 Unavailable backends cannot connect. Selection is saved in `connection.json`; corrupt preferences produce an error rather than selecting another backend. Connection failure does not cause automatic fallback.
 
@@ -24,7 +24,7 @@ Local packaging defaults to ad hoc signing. Set `ZION_CODESIGN_IDENTITY` to an i
 
 The `packet-tunnel` Cargo feature uses netstack-smoltcp to turn raw IPv4/IPv6 TCP and UDP packets into Zion QUIC sessions. It authenticates before reporting readiness and uses bounded queues with a shared TCP/UDP session budget.
 
-The engine does not create interfaces or configure routes and DNS. Future platform adapters must supply packets from NetworkExtension `packetFlow` or helper-managed utun. Neither adapter exists yet.
+The packet engine does not create interfaces or configure routes and DNS. The optional `tun-device` feature adds a tun-rs adapter and a foreground CLI for macOS/Linux; see [TUN transport](tun.md). NetworkExtension `packetFlow` and helper-to-app device handoff remain unimplemented.
 
 ICMP and fragmented IP packets are unsupported. UDP exceeding the virtual MTU or QUIC Datagram limit is dropped. Full IPv6 extension-header coverage has not been established.
 
@@ -39,15 +39,15 @@ Swift removes the send handle before teardown and rejects late events from previ
 ## Build and test
 
 ```sh
-cargo test --locked --features packet-tunnel
+cargo test --locked --features tun-device
 python3 scripts/build-macos.py
 ZION_PACKET_LIBRARY="$PWD/target/release/libzion.a" \
 ZION_INTEGRATION_CORE="$PWD/target/macos/Zion.app/Contents/Helpers/zion-core" \
 swift test --package-path macos
 ```
 
-The packaging script enables the feature and links the static library. Standalone Swift builds need `ZION_PACKET_LIBRARY` to enable native linking. Real-core tests require `ZION_INTEGRATION_CORE`; native engine coverage also requires the library.
+The packaging script enables `tun-device` (which includes `packet-tunnel`) and links the static library. It fingerprints the archive and cleans Swift build products when it changes, preventing reuse of an older embedded core. Standalone Swift builds need `ZION_PACKET_LIBRARY` to enable native linking. Real-core tests require `ZION_INTEGRATION_CORE`; native engine coverage also requires the library.
 
 Tests cover raw IPv4/IPv6 TCP and UDP, half-close, empty datagrams, queue limits, authentication, and native start/stop/restart. Backend controller tests use substitute adapters. No test installs a helper or extension, creates utun, or changes system networking.
 
-Remaining platform work includes the TUN control IPC, utun creation, endpoint loop prevention, route and DNS policy, network changes, and crash recovery.
+Remaining app integration includes authenticated device handoff, endpoint loop prevention, route and DNS policy, network changes, and crash recovery.

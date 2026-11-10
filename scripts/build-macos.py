@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Build and package the native macOS app with its owned Rust proxy helper."""
+"""Build and sign the native macOS app with its Rust core and privileged helper."""
 
+import hashlib
 import os
 import pathlib
 import plistlib
@@ -52,12 +53,27 @@ def assemble(root, swift_directory):
     return app
 
 
+def archive_digest(path):
+    """Fingerprint the external Rust archive that SwiftPM does not track as a target input."""
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def main():
-    """Compile both components and verify a locally usable ad hoc signed bundle."""
+    """Compile the core and native helpers, then verify the signed application bundle."""
     root = pathlib.Path(__file__).resolve().parent.parent
     os.environ["MACOSX_DEPLOYMENT_TARGET"] = "14.0"
-    run(["cargo", "build", "--locked", "--release", "--features", "packet-tunnel"], root)
-    os.environ["ZION_PACKET_LIBRARY"] = str(root / "target/release/libzion.a")
+    run(["cargo", "build", "--locked", "--release", "--features", "tun-device"], root)
+    archive = root / "target/release/libzion.a"
+    os.environ["ZION_PACKET_LIBRARY"] = str(archive)
+    fingerprint = archive_digest(archive)
+    stamp = root / "target/macos-native.sha256"
+    if not stamp.exists() or stamp.read_text().strip() != fingerprint:
+        print("Rust archive changed; rebuilding Swift targets.", flush=True)
+        run(["swift", "package", "--package-path", "macos", "clean"], root)
     run(["swift", "build", "--package-path", "macos", "-c", "release"], root)
     location = subprocess.check_output(
         ["swift", "build", "--package-path", "macos", "-c", "release", "--show-bin-path"],
@@ -72,6 +88,7 @@ def main():
     run(signing + ["--identifier", "dev.zion.helper", str(app / "Contents/Library/HelperTools/zion-helper")], root)
     run(signing + [str(app)], root)
     run(["codesign", "--verify", "--deep", "--strict", str(app)], root)
+    stamp.write_text(fingerprint + "\n")
     print(app)
 
 

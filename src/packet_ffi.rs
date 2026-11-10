@@ -129,7 +129,7 @@ pub unsafe extern "C" fn zion_packet_send(
     packet: *const u8,
     length: usize,
 ) -> i32 {
-    if handle.is_null() || packet.is_null() || length == 0 || length > 9000 {
+    if handle.is_null() || packet.is_null() || length == 0 || length > crate::packet::MAX_MTU {
         return -1;
     }
     // SAFETY: the caller serializes destruction with packet submission and supplies readable bytes.

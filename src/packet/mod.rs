@@ -19,6 +19,17 @@ use tokio_util::sync::CancellationToken;
 const QUEUE_CAPACITY: usize = 256;
 /// A conservative virtual MTU fits both IP families while leaving QUIC path sizing independent.
 pub const DEFAULT_MTU: usize = 1500;
+/// Every native packet entry point uses the same maximum virtual packet size.
+pub const MAX_MTU: usize = 9000;
+
+/// Require a virtual MTU that accommodates IPv6 while bounding per-packet allocations.
+pub fn validate_mtu(mtu: usize) -> anyhow::Result<()> {
+    ensure!(
+        (1280..=MAX_MTU).contains(&mtu),
+        "virtual MTU must be from 1280 to 9000"
+    );
+    Ok(())
+}
 
 /// A cloneable ingress port accepts complete IP packets from either native backend.
 #[derive(Clone)]
@@ -66,10 +77,7 @@ impl PacketSender {
 impl PacketTunnel {
     /// Start a shared userspace stack without creating an interface or changing system networking.
     pub async fn start(config: Config, mtu: usize) -> anyhow::Result<Self> {
-        ensure!(
-            (1280..=9000).contains(&mtu),
-            "virtual MTU must be from 1280 to 9000"
-        );
+        validate_mtu(mtu)?;
         let client = config
             .tunnel
             .as_ref()
@@ -149,6 +157,11 @@ impl PacketTunnel {
             shutdown,
             task: Some(task),
         })
+    }
+
+    /// Return the packet engine's configured MTU for a matching native-device transport.
+    pub fn mtu(&self) -> usize {
+        self.ingress.mtu
     }
 
     /// Clone the bounded ingress handle for a native packet callback.

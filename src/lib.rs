@@ -36,3 +36,7 @@ pub mod packet_ffi;
 
 /// Native app commands expose a versioned local control interface for users and agents.
 pub mod app_cli;
+
+/// TUN devices connect tun-rs packet I/O to the shared authenticated IP engine.
+#[cfg(all(feature = "tun-device", any(target_os = "macos", target_os = "linux")))]
+pub mod tun;

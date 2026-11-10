@@ -30,6 +30,9 @@ struct Args {
 /// Subcommands select credential issuance or one authenticated tunnel role.
 #[derive(Subcommand)]
 enum Mode {
+    /// Create a privileged TUN interface without installing default routes or DNS settings.
+    #[cfg(all(feature = "tun-device", any(target_os = "macos", target_os = "linux")))]
+    Tun(zion::tun::cli::TunArgs),
     /// Control the running native macOS app with JSON responses.
     App(zion::app_cli::AppArgs),
     /// Issue a fresh CA and client/server identities into a new directory.
@@ -171,9 +174,11 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-/// Start one selected role without changing the host's network or trust configuration.
+/// Start the selected proxy role or explicitly requested native TUN transport.
 async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
     match args.mode {
+        #[cfg(all(feature = "tun-device", any(target_os = "macos", target_os = "linux")))]
+        Some(Mode::Tun(options)) => zion::tun::cli::run(options, shutdown).await,
         Some(Mode::App(_)) => unreachable!("app commands run before tunnel supervision"),
         Some(Mode::Credentials(options)) => {
             tls::generate(&options.output, &options.server_name)?;

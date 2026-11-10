@@ -11,6 +11,7 @@ crate-type = ["rlib", "staticlib"]
 
 [features]
 packet-tunnel = ["dep:netstack-smoltcp", "dep:futures-util", "dep:etherparse"]
+tun-device = ["packet-tunnel", "dep:tun-rs", "dep:ipnet"]
 
 [dependencies]
 anyhow = "1"
@@ -48,4 +49,11 @@ etherparse = "0.16"
 tempfile = "3"
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
+nix = { version = "0.31", default-features = false, features = ["net"] }
+
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+tun-rs = { version = "2.8.18", features = ["async_tokio"], optional = true }
+ipnet = { version = "2", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
 nix = { version = "0.31", default-features = false, features = ["net"] }
