@@ -118,21 +118,37 @@ import Testing
         #expect(secrets.values.isEmpty)
     }
 
+    /// CLI log reads and copied diagnostics expose sanitized session entries with bounded limits.
+    @Test func logsShareSanitizedEntriesWithCLI() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let app = model(directory, CommandSecrets())
+        app.logs.append("ERROR password=hidden failure")
+        app.logs.append("INFO latest")
+        let result = try await call(app, "logs.read", ["limit": "1"])
+        let body = try #require(result["result"] as? [String: Any])
+        let entries = try #require(body["entries"] as? [[String: Any]])
+        #expect(entries.count == 1 && entries[0]["message"] as? String == "INFO latest")
+        #expect(!app.diagnosticReport.contains("hidden"))
+        let invalid = try await call(app, "logs.read", ["limit": "101"])
+        #expect((invalid["error"] as? [String: String])?["code"] == "invalid_arguments")
+    }
+
     /// A real Rust CLI reaches the Swift socket without launching the GUI or writing system settings.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["ZION_CONTROL_CLI"] != nil))
     func rustCLIReachesSwiftControlSocket() async throws {
         let binary = try #require(ProcessInfo.processInfo.environment["ZION_CONTROL_CLI"])
         let directory = URL(fileURLWithPath: "/tmp/zion-test-" + String(UUID().uuidString.prefix(8)))
         let path = directory.appendingPathComponent("control.sock").path
-        let server = ControlSocket(path: path) { request in
-            (try? JSONSerialization.data(withJSONObject: ["version": 1, "ok": true, "result": ["command": request.command]])) ?? Data()
-        }
+        let app = model(directory, CommandSecrets())
+        app.logs.append("INFO socket diagnostic")
+        let server = ControlSocket(path: path) { request in await app.handleControl(request) }
         try server.start()
         defer { server.stop(); try? FileManager.default.removeItem(at: directory) }
         let response = try await Task.detached {
             let process = Process(); let output = Pipe()
             process.executableURL = URL(fileURLWithPath: binary)
-            process.arguments = ["app", "--socket", path, "status"]
+            process.arguments = ["app", "--socket", path, "logs", "--limit", "1"]
             process.standardOutput = output
             try process.run()
             let data = output.fileHandleForReading.readDataToEndOfFile()
@@ -141,7 +157,9 @@ import Testing
             return data
         }.value
         let result = try JSONSerialization.jsonObject(with: response) as! [String: Any]
-        #expect((result["result"] as? [String: String])?["command"] == "status")
+        let body = try #require(result["result"] as? [String: Any])
+        let entries = try #require(body["entries"] as? [[String: Any]])
+        #expect(entries.count == 1 && entries[0]["message"] as? String == "INFO socket diagnostic")
         let attrs = try FileManager.default.attributesOfItem(atPath: path)
         #expect((attrs[.posixPermissions] as? NSNumber)?.intValue == 0o600)
         let duplicate = ControlSocket(path: path) { _ in Data() }

@@ -49,7 +49,9 @@ Configuration is sent as JSON through stdin, then the pipe is closed. Stdout car
 
 Startup failure emits `{"event":"error","message":"..."}` and exits unsuccessfully. The core binds a random loopback port and authenticates a real QUIC session before reporting ready. This is a startup probe, not ongoing health monitoring.
 
-The controller validates the loopback address, bounds output buffering and startup time, and rejects callbacks from old processes. The activity view retains up to 500 log entries; traffic counters and latency measurements are not implemented.
+The controller validates the loopback address, bounds output buffering and startup time, and rejects callbacks from old processes. The Logs page shows connection state, the selected server and interface, the local listener, pending recovery, and the latest error. Session events include core output and connection or recovery failures. Search, severity filtering, follow-latest, clear, and copy-diagnostics are available.
+
+Logs are held in memory: at most 500 lines, roughly 1 KiB per line. Known connection passwords, named secret fields, private-key blocks, and terminal escapes are filtered before retention. Copied reports include server addresses and system version. Clearing or restarting discards retained entries; no log file is written. Traffic counters and latency measurements are not implemented.
 
 ## System proxy and recovery
 

@@ -135,3 +135,27 @@ fn invalid_import_is_a_structured_local_error() {
     assert!(!String::from_utf8_lossy(&output.stdout).contains("private-value"));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("private-value"));
 }
+
+/// Log reads carry an explicit bounded count through the same authenticated local endpoint.
+#[test]
+fn logs_use_bounded_read_command() {
+    let (output, request) = call(
+        &["logs", "--limit", "20"],
+        json!({"version":1,"ok":true,"result":{"entries":[],"retained":0}}),
+    );
+    assert!(output.status.success());
+    assert_eq!(
+        request,
+        json!({"version":1,"command":"logs.read","arguments":{"limit":"20"}})
+    );
+}
+
+/// Invalid log limits are rejected by argument parsing before any app connection is attempted.
+#[test]
+fn invalid_log_limit_is_rejected() {
+    let output = Command::new(env!("CARGO_BIN_EXE_zion"))
+        .args(["app", "logs", "--limit", "101"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+}

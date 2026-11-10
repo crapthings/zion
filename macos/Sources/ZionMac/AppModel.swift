@@ -4,13 +4,6 @@ import Observation
 import UniformTypeIdentifiers
 import ZionControl
 
-/// An activity entry contains a bounded diagnostic line and its arrival time.
-struct ActivityEntry: Identifiable {
-    let id = UUID()
-    let date = Date()
-    let message: String
-}
-
 /// Import values mirror the existing JSON schema and keep imported passwords out of profile storage.
 private struct ImportedConfiguration: Decodable {
     let server: String
@@ -29,8 +22,8 @@ private struct ImportedConfiguration: Decodable {
 /// The application model coordinates profile storage, Keychain, and connection presentation.
 @Observable @MainActor final class AppModel {
     var document = ProfileDocument()
-    var activities: [ActivityEntry] = []
-    var alert: String?
+    let logs = DiagnosticLog()
+    var alert: String? { didSet { if let alert { logs.append(alert, level: .error) } } }
     var editing: ServerProfile?
     var editingPassword = ""
     var storageError = false
@@ -57,6 +50,7 @@ private struct ImportedConfiguration: Decodable {
         self.connection.onLog = { [weak self] message in self?.append(message) }
         do { document = try store.load() }
         catch { storageError = true; alert = "无法读取服务器列表，现有配置未被覆盖。" }
+        logs.append("应用已启动，已加载 \(document.profiles.count) 台服务器。")
     }
 
     /// Start local command handling without opening a window or changing network settings.
@@ -200,8 +194,7 @@ private struct ImportedConfiguration: Decodable {
 
     /// Bound activity history to avoid retaining an unbounded stream of diagnostic messages.
     private func append(_ message: String) {
-        activities.append(ActivityEntry(message: message))
-        if activities.count > 500 { activities.removeFirst(activities.count - 500) }
+        logs.append(message)
     }
 }
 
@@ -214,6 +207,7 @@ extension AppModel {
             let allowed: Set<String>
             switch request.command {
             case "status", "profiles.list", "connect", "disconnect": allowed = []
+            case "logs.read": allowed = ["limit"]
             case "profiles.import": allowed = ["name", "config"]
             case "profiles.select", "profiles.remove": allowed = ["id"]
             case "backend.select": allowed = ["backend"]
@@ -231,6 +225,14 @@ extension AppModel {
         let arguments = request.arguments
         switch request.command {
         case "status": return controlStatus()
+        case "logs.read":
+            guard let raw = arguments["limit"], let limit = Int(raw), (1...100).contains(limit) else {
+                throw AppCommandError("invalid_arguments", "Log limit must be from 1 to 100.")
+            }
+            let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(Array(logs.entries.suffix(limit)))
+            return ["entries": try JSONSerialization.jsonObject(with: data), "retained": logs.entries.count]
+
         case "profiles.list":
             guard !storageError else { throw AppCommandError("storage_unavailable", "Profile storage is unreadable.") }
             let data = try JSONEncoder().encode(document)

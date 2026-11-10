@@ -137,7 +137,10 @@ import Testing
         let engine = MemoryEngine(); engine.startupError = true
         let proxy = MemoryProxy()
         let controller = ConnectionController(engine: engine, proxy: proxy)
+        var messages: [String] = []
+        controller.onLog = { messages.append($0) }
         await controller.connect(configuration: try configuration())
+        #expect(messages.contains(where: { $0.hasPrefix("ERROR 连接失败：") }))
         #expect(controller.phase.idle)
         #expect(proxy.enables == 0)
         #expect(engine.stops == 1)
@@ -184,18 +187,23 @@ import Testing
             print('{"event":"stopped"}', flush=True)
             sys.exit(0)
         signal.signal(signal.SIGINT, stop)
+        print("INFO credential " + config["password"], file=sys.stderr, flush=True)
         print('{"event":"ready","listen":"127.0.0.1:12345"}', flush=True)
         signal.pause()
         """
         try Data(source.utf8).write(to: script)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
         let engine = CoreProcess(executable: script)
+        var messages: [String] = []
+        engine.onLog = { messages.append($0) }
         let endpoint = try await engine.start(configuration: configuration())
         #expect(endpoint.port == 12345)
         await engine.stop()
         let restarted = try await engine.start(configuration: configuration())
         #expect(restarted == endpoint)
         await engine.stop()
+        #expect(messages.contains(where: { $0.contains("[redacted]") }))
+        #expect(!messages.contains(where: { $0.contains("test-secret") }))
     }
     @Test func startupWaitsForReadinessBeforeChangingProxy() async throws {
         let engine = MemoryEngine(), proxy = MemoryProxy()

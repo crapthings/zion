@@ -21,6 +21,11 @@ pub struct AppArgs {
 enum AppCommand {
     /// Return the live app connection state.
     Status,
+    /// Read recent sanitized app logs without changing the connection.
+    Logs {
+        #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u16).range(1..=100))]
+        limit: u16,
+    },
     /// Connect the selected profile using the selected backend.
     Connect,
     /// Disconnect and restore network settings, or retry pending recovery.
@@ -74,6 +79,10 @@ fn request(options: &AppArgs) -> anyhow::Result<Zeroizing<Vec<u8>>> {
     let mut arguments = BTreeMap::<String, String>::new();
     let command = match &options.command {
         AppCommand::Status => "status",
+        AppCommand::Logs { limit } => {
+            arguments.insert("limit".into(), limit.to_string());
+            "logs.read"
+        }
         AppCommand::Connect => "connect",
         AppCommand::Disconnect => "disconnect",
         AppCommand::Backend { backend } => {

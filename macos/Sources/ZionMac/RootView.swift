@@ -4,10 +4,10 @@ import ZionControl
 
 /// Navigation groups the primary workflow separately from auxiliary pages added later.
 private enum Page: String, CaseIterable, Identifiable {
-    case overview = "概览", servers = "服务器", activity = "活动", settings = "设置"
+    case overview = "概览", servers = "服务器", logs = "日志", settings = "设置"
     var id: Self { self }
     var symbol: String {
-        switch self { case .overview: "shield"; case .servers: "server.rack"; case .activity: "waveform.path"; case .settings: "gearshape" }
+        switch self { case .overview: "shield"; case .servers: "server.rack"; case .logs: "doc.text.magnifyingglass"; case .settings: "gearshape" }
     }
 }
 
@@ -34,7 +34,7 @@ struct RootView: View {
                 switch page ?? .overview {
                 case .overview: OverviewView(model: model)
                 case .servers: ServerListView(model: model)
-                case .activity: ActivityView(model: model)
+                case .logs: LogsView(model: model)
                 case .settings: SettingsView(model: model)
                 }
             }
@@ -124,25 +124,6 @@ private struct ServerListView: View {
                 }.listStyle(.inset)
             }
             HStack { Text("密码保存在 macOS 钥匙串中。").font(.caption).foregroundStyle(.secondary); Spacer(); Button("添加服务器", systemImage: "plus") { model.edit() }.disabled(!model.connection.phase.idle) }.padding(20)
-        }
-    }
-}
-
-/// Activity displays actual bounded core logs without inventing traffic statistics.
-private struct ActivityView: View {
-    let model: AppModel
-    var body: some View {
-        VStack(spacing: 0) {
-            if model.activities.isEmpty { ContentUnavailableView("暂无活动", systemImage: "waveform.path", description: Text("连接后，这里会显示状态与诊断信息。")) }
-            else {
-                List(model.activities) { entry in
-                    HStack(alignment: .top, spacing: 16) {
-                        Text(entry.date, style: .time).foregroundStyle(.secondary).frame(width: 74, alignment: .leading)
-                        Text(entry.message).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    }.font(.system(.caption, design: .monospaced)).padding(.vertical, 3)
-                }.listStyle(.plain)
-            }
-            HStack { Text("仅保留最近 500 条记录").font(.caption).foregroundStyle(.secondary); Spacer(); Button("清空") { model.activities.removeAll() } }.padding(20)
         }
     }
 }

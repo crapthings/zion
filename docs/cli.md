@@ -6,6 +6,7 @@ Build with `python3 scripts/build-macos.py`, then restart the app to load the co
 
 ```sh
 ./target/release/zion app status
+./target/release/zion app logs --limit 20
 ./target/release/zion app profile import --name Tokyo -c client.yaml
 ./target/release/zion app profile list
 ./target/release/zion app connect
@@ -42,6 +43,8 @@ Branch on `ok`, `error.code`, and state fields rather than parsing messages. Pha
 
 Error codes include `invalid_arguments`, `control_unavailable`, `unsupported_version`, `invalid_request`, `unknown_command`, `storage_unavailable`, `busy`, `not_found`, `no_profile`, `backend_unavailable`, `connection_failed`, `recovery_required`, `operation_failed`, and `response_too_large`.
 
+`logs --limit N` reads the most recent 1–100 sanitized session entries (default 100). Its result contains `entries` with `id`, ISO 8601 `date`, `level`, and `message`, plus `retained` for the total buffered count. Reading logs does not alter the connection. Logs can contain destination or server addresses.
+
 ## Local protocol
 
 The app listens at `/tmp/zion-UID/control.sock` in a private directory. Socket permissions are `0600`, and both peers verify the other endpoint's UID. An exclusive lock permits one app control owner. This trusts processes running as the same user; it does not isolate agents from other local applications.
@@ -55,6 +58,7 @@ Requests are one JSON line of at most 64 KiB; responses are at most 256 KiB. Eig
 | Command | Arguments |
 | --- | --- |
 | `status`, `connect`, `disconnect`, `profiles.list` | Empty object |
+| `logs.read` | `limit` (string integer, 1–100) |
 | `profiles.import` | `name`, `config` (client JSON encoded as a string) |
 | `profiles.select`, `profiles.remove` | `id` (UUID) |
 | `backend.select` | `backend` (`systemProxy`, `networkExtension`, `helperTun`) |

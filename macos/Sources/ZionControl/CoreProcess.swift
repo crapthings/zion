@@ -28,6 +28,7 @@ private struct CoreEvent: Decodable {
     private var pending: CheckedContinuation<ProxyEndpoint, Error>?
     private var timeoutTask: Task<Void, Never>?
     private var generation = UUID()
+    private var sanitizer = DiagnosticSanitizer()
 
     /// Inject a binary in tests while resolving the packaged core in the desktop app.
     public init(executable: URL? = nil) { self.executable = executable ?? Self.defaultExecutable() }
@@ -38,6 +39,7 @@ private struct CoreEvent: Decodable {
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
             throw ControlError("没有找到可执行的代理核心，请使用完整的 Zion.app。")
         }
+        sanitizer = DiagnosticSanitizer(password: configuration.password)
         let data = try JSONEncoder().encode(configuration)
         let token = UUID()
         generation = token
@@ -113,7 +115,15 @@ private struct CoreEvent: Decodable {
 
     /// Buffer complete lines while rejecting oversized or malformed control output.
     private func consume(_ data: Data, diagnostic: Bool, token: UUID) {
-        guard token == generation, !data.isEmpty else { return }
+        guard token == generation else { return }
+        if data.isEmpty {
+            if diagnostic && !errors.isEmpty {
+                let message = sanitizer.clean(String(decoding: errors, as: UTF8.self))
+                if !message.isEmpty { onLog?(message) }
+                errors.removeAll()
+            }
+            return
+        }
         if diagnostic { errors.append(data) } else { output.append(data) }
         var buffer = diagnostic ? errors : output
         guard buffer.count <= 64 * 1024 else {
@@ -124,7 +134,10 @@ private struct CoreEvent: Decodable {
         while let newline = buffer.firstIndex(of: 10) {
             let line = Data(buffer[..<newline])
             buffer.removeSubrange(...newline)
-            if diagnostic { onLog?(String(decoding: line, as: UTF8.self)) }
+            if diagnostic {
+                let message = sanitizer.clean(String(decoding: line, as: UTF8.self))
+                if !message.isEmpty { onLog?(message) }
+            }
             else { receive(line) }
         }
         if diagnostic { errors = buffer } else { output = buffer }
@@ -145,7 +158,7 @@ private struct CoreEvent: Decodable {
                 pending?.resume(returning: endpoint)
                 pending = nil
             } catch { fail(error); process?.terminate() }
-        case "error": fail(ControlError(event.message ?? "核心连接失败。"))
+        case "error": fail(ControlError(sanitizer.clean(event.message ?? "核心连接失败。")))
         case "stopped": break
         default: fail(ControlError("核心状态版本不兼容。")); process?.terminate()
         }
@@ -154,7 +167,7 @@ private struct CoreEvent: Decodable {
     /// Finish pending startup and report an unexpected process exit to its coordinator.
     private func terminated(status: Int32, token: UUID) {
         guard token == generation else { return }
-        fail(ControlError("代理核心已退出（\(status)），可在活动中查看详情。"))
+        fail(ControlError("代理核心已退出（\(status)），可在日志中查看详情。"))
         clearHandlers()
         process = nil
         onExit?(status)

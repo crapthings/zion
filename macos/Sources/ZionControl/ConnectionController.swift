@@ -52,18 +52,21 @@ public enum ConnectionPhase: Equatable, Sendable {
         let token = UUID(); operation = token
         lastError = nil
         phase = .connecting
+        onLog?("正在启动核心并验证远端身份。")
         var readyEndpoint: ProxyEndpoint?
         do {
             let ready = try await engine.start(configuration: configuration)
             guard operation == token else { return }
             readyEndpoint = ready
             phase = .authorizing
+            onLog?("远端认证通过，本地监听 \(ready.description)，正在启用系统代理。")
             try proxy.enable(endpoint: ready)
             endpoint = ready
             phase = .connected
             onLog?("系统代理已启用。")
         } catch {
             guard operation == token else { return }
+            onLog?("ERROR 连接失败：" + error.localizedDescription)
             if let readyEndpoint, proxy.needsRecovery {
                 endpoint = readyEndpoint
                 phase = .recoveryRequired
@@ -85,6 +88,7 @@ public enum ConnectionPhase: Equatable, Sendable {
         do { try proxy.restore() }
         catch {
             lastError = error.localizedDescription
+            onLog?("ERROR 恢复系统代理失败：" + error.localizedDescription)
             phase = previous.active ? previous : .failed(error.localizedDescription)
             return false
         }
@@ -101,7 +105,7 @@ public enum ConnectionPhase: Equatable, Sendable {
         guard phase.idle else { return }
         defer { recoveryRecorded = proxy.needsRecovery }
         do { try proxy.restore(); lastError = nil; onLog?("网络代理设置已恢复。") }
-        catch { lastError = error.localizedDescription }
+        catch { lastError = error.localizedDescription; onLog?("ERROR 网络恢复失败：" + error.localizedDescription) }
     }
 
     /// Restore owned proxy settings after an unexpected core exit.
@@ -109,6 +113,7 @@ public enum ConnectionPhase: Equatable, Sendable {
         guard phase != .disconnected && phase != .disconnecting else { return }
         defer { recoveryRecorded = proxy.needsRecovery }
         operation = UUID()
+        onLog?("ERROR 代理核心意外退出，状态码 \(status)。")
         do {
             try proxy.restore()
             endpoint = nil
