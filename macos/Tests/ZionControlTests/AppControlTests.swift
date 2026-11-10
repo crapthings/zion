@@ -160,6 +160,39 @@ import Testing
         #expect(service.status == .notRegistered)
     }
 
+    /// Skipping and reopening setup leave profiles, credentials, and connection ownership unchanged.
+    @Test func setupCanBeSkippedWithNoServerOrPermissions() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let secrets = CommandSecrets(); let engine = CommandEngine()
+        let app = model(directory, secrets, engine)
+        #expect(app.setupGuide.isPresented)
+        app.finishSetup()
+        #expect(!app.setupGuide.isPresented && app.document.profiles.isEmpty)
+        #expect(engine.starts == 0 && secrets.values.isEmpty && app.connection.phase == .disconnected)
+        app.showSetup()
+        #expect(app.setupGuide.isPresented && engine.starts == 0)
+    }
+
+    /// Repeated guide activation and skipping cannot disconnect an already established session.
+    @Test func guideConnectionIsExplicitAndDoesNotToggleOff() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let engine = CommandEngine(); let secrets = CommandSecrets(); let reader = SetupReaderFixture()
+        let app = AppModel(store: ProfileStore(directory: directory), secrets: secrets,
+            connection: BackendConnection(system: ConnectionController(engine: engine, proxy: CommandProxy()), enhanced: [], selected: .systemProxy),
+            setupGuide: SetupGuide(directory: directory, reader: reader))
+        var profile = ServerProfile(); profile.name = "Test"; profile.server = "passage.example.com:8443"
+        try app.save(profile, password: "secret")
+        #expect(engine.starts == 0 && reader.reads == 0)
+        await app.connectFromSetup()
+        #expect(app.connection.phase.connected && engine.starts == 1 && reader.reads == 1)
+        await app.connectFromSetup()
+        app.finishSetup()
+        #expect(app.connection.phase.connected && engine.starts == 1)
+        #expect(await app.connection.disconnect())
+    }
+
     /// A real Rust CLI reaches the Swift socket without launching the GUI or writing system settings.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["ZION_CONTROL_CLI"] != nil))
     func rustCLIReachesSwiftControlSocket() async throws {

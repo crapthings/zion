@@ -35,9 +35,22 @@ import ZionControl
                 .onAppear { delegate.model = model; model.startControl() }
         }
         .defaultSize(width: 920, height: 650)
-        .commands { CommandGroup(after: .newItem) { Button("导入 JSON 配置…") { model.importJSON() }.keyboardShortcut("i", modifiers: [.command, .shift]) } }
+        .commands { SetupCommands(model: model) }
         MenuBarExtra("Zion", systemImage: model.connection.phase.connected ? "shield.lefthalf.filled" : "shield") {
             MenuContent(model: model).onAppear { delegate.model = model; model.startControl() }
+        }
+    }
+}
+
+/// Global commands reopen the guide's main window even when only the menu-bar app remains visible.
+private struct SetupCommands: Commands {
+    let model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Button("导入 JSON 配置…") { model.importJSON() }.keyboardShortcut("i", modifiers: [.command, .shift])
+            Button("启动引导…") { model.showSetup(); openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
         }
     }
 }
@@ -56,6 +69,7 @@ private struct MenuContent: View {
         Divider()
         Button(model.connection.phase == .recoveryRequired ? "恢复网络" : model.connection.phase.connected ? "断开连接" : "连接") { Task { await model.toggle() } }
             .disabled(model.connection.phase.busy || (model.connection.phase.idle && !model.canConnect))
+        Button("启动引导…") { model.showSetup(); openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
         Button("打开 Zion") { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
         Divider()
         Button("退出 Zion") { NSApp.terminate(nil) }.keyboardShortcut("q")

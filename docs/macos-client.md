@@ -20,6 +20,14 @@ swift build --package-path macos
 
 The development app looks for `target/debug/zion`; packaged builds use their bundled core. `ZION_CORE_PATH` overrides either location. See [backends](backends.md) for static-library linking and native integration tests.
 
+## First launch
+
+The setup guide appears on first launch and can be skipped without a server or network authorization. Continue and Skip both dismiss it; the optional every-launch checkbox is saved in the private `setup.json` file. Reopen it from Settings or the app/menu-bar commands.
+
+The guide reads enabled global and interface-scoped proxy mechanisms and lists up, addressed virtual interfaces. Interfaces belonging to VPNs or other apps are not attributed to Zion. Failed detection is shown as unknown rather than disabled. Returning to the app or completing a connection refreshes the display.
+
+Opening the guide does not change networking. System proxy activation requires an explicit connection action and uses the existing authentication and restoration flow. Helper installation and approval remain explicit. Enhanced-mode routing is still unavailable.
+
 ## Profiles
 
 Add a name, server address, and password, or use a client certificate. Advanced password settings can include a certificate pair when both factors are required. Private CA files, certificate-name overrides, and outbound interfaces are supported.

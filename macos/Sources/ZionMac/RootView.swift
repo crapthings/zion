@@ -18,6 +18,24 @@ struct RootView: View {
     @State private var page: Page? = .overview
 
     var body: some View {
+        Group {
+            if model.setupGuide.isPresented { SetupGuideView(model: model) }
+            else { mainContent }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                model.helperInstallation.refresh()
+                if model.setupGuide.isPresented { model.setupGuide.refresh() }
+            }
+        }
+        .onChange(of: model.connection.phase) { _, _ in if model.setupGuide.isPresented { model.setupGuide.refresh() } }
+        .frame(minWidth: 780, minHeight: 600)
+        .sheet(item: $model.editing) { profile in ProfileEditor(model: model, initial: profile, initialPassword: model.editingPassword) }
+        .alert("Zion", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) { Button("好") { model.alert = nil } } message: { Text(model.alert ?? "") }
+    }
+
+    /// Preserve the main workspace independently from the skippable first-launch guide.
+    private var mainContent: some View {
         NavigationSplitView {
             List(Page.allCases, selection: $page) { item in Label(item.rawValue, systemImage: item.symbol).tag(item) }
                 .listStyle(.sidebar)
@@ -42,10 +60,6 @@ struct RootView: View {
             .navigationTitle((page ?? .overview).rawValue)
             .toolbar { ToolbarItem { Button { model.importJSON() } label: { Label("导入 JSON", systemImage: "square.and.arrow.down") }.disabled(!model.connection.phase.idle) } }
         }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { model.helperInstallation.refresh() } }
-        .frame(minWidth: 780, minHeight: 540)
-        .sheet(item: $model.editing) { profile in ProfileEditor(model: model, initial: profile, initialPassword: model.editingPassword) }
-        .alert("Zion", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) { Button("好") { model.alert = nil } } message: { Text(model.alert ?? "") }
     }
 }
 
@@ -145,6 +159,7 @@ private struct SettingsView: View {
                 Text("服务器信息保存在本机，密码独立保存在钥匙串。").foregroundStyle(.secondary)
                 Button("打开配置目录") { try? FileManager.default.createDirectory(at: model.store.directory, withIntermediateDirectories: true); NSWorkspace.shared.open(model.store.directory) }
             }
+            Section("引导") { Button("打开启动引导") { model.showSetup() } }
             Section("关于") { LabeledContent("Zion", value: "0.1.0"); Text("原生 macOS 界面 · Rust 网络核心").foregroundStyle(.secondary) }
         }.formStyle(.grouped).padding(16)
     }

@@ -27,6 +27,7 @@ private struct ImportedConfiguration: Decodable {
     var editing: ServerProfile?
     var editingPassword = ""
     var storageError = false
+    let setupGuide: SetupGuide
     let helperInstallation: HelperInstallation
     let connection: BackendConnection
     private let preferences: ConnectionPreferencesStore
@@ -36,7 +37,8 @@ private struct ImportedConfiguration: Decodable {
     private let secrets: any SecretStore
 
     /// Assemble native services without starting a core or modifying network preferences.
-    init(store: ProfileStore = ProfileStore(), secrets: any SecretStore = KeychainStore(), connection: BackendConnection? = nil, helperInstallation: HelperInstallation = HelperInstallation()) {
+    init(store: ProfileStore = ProfileStore(), secrets: any SecretStore = KeychainStore(), connection: BackendConnection? = nil, helperInstallation: HelperInstallation = HelperInstallation(), setupGuide: SetupGuide? = nil) {
+        self.setupGuide = setupGuide ?? SetupGuide(directory: store.directory)
         self.helperInstallation = helperInstallation
         self.store = store
         self.secrets = secrets
@@ -95,6 +97,30 @@ private struct ImportedConfiguration: Decodable {
     func uninstallHelper() async {
         guard canManageComponents else { return }
         await helperInstallation.uninstall()
+    }
+
+    /// Show setup again without changing the selected profile, backend, or connection.
+    func showSetup() { setupGuide.open() }
+
+    /// Complete or skip setup even when network permissions or a server are unavailable.
+    func finishSetup() {
+        setupGuide.finish(persist: !storageError)
+        if let error = setupGuide.preferenceError { logs.append(error, level: .warning) }
+    }
+
+    /// Permit guide configuration only while storage, connection ownership, and editing are ready.
+    var canConfigureSetupProxy: Bool {
+        !storageError && preferencesReadable && !helperInstallation.busy && connection.phase.idle && !connection.needsRecovery && editing == nil
+    }
+
+    /// Run system-proxy activation only after the guide's explicit connection action.
+    func connectFromSetup() async {
+        guard canConfigureSetupProxy else { return }
+        guard selectedProfile != nil else { edit(); return }
+        selectBackend(.systemProxy)
+        guard connection.selectedBackend == .systemProxy else { return }
+        await toggle()
+        setupGuide.refresh()
     }
 
     /// Select a profile only when doing so cannot silently change a running connection.
