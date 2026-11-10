@@ -1,0 +1,4 @@
+{
+  "server": "proxy.example.com:8443",
+  "password": "replace-with-a-long-random-password"
+}

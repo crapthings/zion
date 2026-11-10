@@ -1,0 +1,4 @@
+server: proxy.example.com:8443
+ca: ca.pem
+cert: client.pem
+key: client.key

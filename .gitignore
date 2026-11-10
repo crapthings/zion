@@ -1,0 +1,40 @@
+/target/
+.env
+*.key
+
+/credentials/
+
+# Local runtime configurations may contain passwords.
+/client.json
+/client.yaml
+/client.yml
+/server.json
+/server.yaml
+/server.yml
+
+# Swift build products remain local.
+/macos/.build/
+/macos/.swiftpm/
+
+# Operating system and editor state.
+.DS_Store
+._*
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local secrets and signing material.
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.mobileprovision
+*.provisionprofile
+
+# Transient diagnostics and Python caches.
+*.log
+__pycache__/
+*.py[cod]

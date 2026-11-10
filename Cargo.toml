@@ -1,0 +1,51 @@
+[package]
+name = "zion"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+description = "A modular TCP and UDP proxy core"
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[features]
+packet-tunnel = ["dep:netstack-smoltcp", "dep:futures-util", "dep:etherparse"]
+
+[dependencies]
+anyhow = "1"
+etherparse = { version = "0.16", optional = true }
+netstack-smoltcp = { version = "0.2.5", optional = true }
+futures-util = { version = "0.3", features = ["sink"], optional = true }
+clap = { version = "4", features = ["derive"] }
+fast-socks5 = "1"
+bytes = "1"
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+rustls-pemfile = "2"
+rcgen = "0.14"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde-saphyr = "2"
+http = "1"
+hickory-resolver = { version = "0.26.3", default-features = false, features = ["tokio"] }
+moka = { version = "0.12", features = ["sync"] }
+ring = "0.17"
+webpki-roots = "1"
+zeroize = "1"
+socket2 = { version = "0.6", features = ["all"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal", "process"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = "thin"
+strip = true
+
+[dev-dependencies]
+etherparse = "0.16"
+tempfile = "3"
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+nix = { version = "0.31", default-features = false, features = ["net"] }

@@ -1,0 +1,5 @@
+# Explicit upstreams share one cached resolver across the server's TCP and UDP sessions.
+password: replace-with-a-long-random-password
+cert: server.pem
+key: server.key
+dns: ["1.1.1.1", "8.8.8.8"]
