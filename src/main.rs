@@ -30,6 +30,8 @@ struct Args {
 /// Subcommands select credential issuance or one authenticated tunnel role.
 #[derive(Subcommand)]
 enum Mode {
+    /// Control the running native macOS app with JSON responses.
+    App(zion::app_cli::AppArgs),
     /// Issue a fresh CA and client/server identities into a new directory.
     Credentials(CredentialArgs),
     /// Run the remote authenticated QUIC server.
@@ -142,6 +144,9 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
     let args = Args::parse();
+    if let Some(Mode::App(options)) = &args.mode {
+        std::process::exit(zion::app_cli::run(options));
+    }
     let machine = matches!(&args.mode, Some(Mode::Client(options)) if options.events_json);
     let shutdown = CancellationToken::new();
     let running = run(args, shutdown.clone());
@@ -169,6 +174,7 @@ async fn main() -> anyhow::Result<()> {
 /// Start one selected role without changing the host's network or trust configuration.
 async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
     match args.mode {
+        Some(Mode::App(_)) => unreachable!("app commands run before tunnel supervision"),
         Some(Mode::Credentials(options)) => {
             tls::generate(&options.output, &options.server_name)?;
             println!("Credentials created in {}", options.output.display());

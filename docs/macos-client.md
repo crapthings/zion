@@ -28,6 +28,10 @@ The app imports JSON client configurations; the CLI also accepts YAML. Relative 
 
 Profiles live in `~/Library/Application Support/Zion/profiles.json`. Passwords are stored in Keychain; selected private keys remain in their original files. Backend selection is saved separately in `connection.json`.
 
+## App control
+
+The [app control CLI](cli.md) manages profiles and connections through a same-user local socket. Changes appear in the running UI; passwords remain in Keychain. Restart an older app build before using these commands.
+
 ## Core process
 
 The system-proxy backend launches:

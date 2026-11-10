@@ -62,7 +62,7 @@ python3 scripts/build-macos.py
 
 The locally signed app is written to `target/macos/Zion.app`, with the Rust core included. System proxy settings apply to applications that honor them. The interface is currently in Chinese.
 
-Read about the [native app](docs/macos-client.md) and [backend integration](docs/backends.md).
+Manage servers and connections through the [app control CLI](docs/cli.md), or read about the [native app](docs/macos-client.md) and [backend integration](docs/backends.md).
 
 ## Develop
 

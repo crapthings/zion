@@ -21,6 +21,6 @@ let package = Package(
         .target(name: "CZionPacket", publicHeadersPath: "include"),
         .target(name: "ZionControl", dependencies: ["CZionPacket"], swiftSettings: packetSettings, linkerSettings: packetLinker),
         .executableTarget(name: "ZionMac", dependencies: ["ZionControl"]),
-        .testTarget(name: "ZionControlTests", dependencies: ["ZionControl"]),
+        .testTarget(name: "ZionControlTests", dependencies: ["ZionControl", "ZionMac"]),
     ]
 )

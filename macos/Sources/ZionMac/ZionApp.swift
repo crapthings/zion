@@ -7,6 +7,10 @@ import ZionControl
     weak var model: AppModel?
     private var terminating = false
 
+    /// Start same-user CLI handling when the application finishes launching.
+    func applicationDidFinishLaunching(_ notification: Notification) { model?.startControl() }
+
+    /// Restore the active backend before permitting application termination.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let model, !model.connection.phase.idle || model.connection.needsRecovery else { return .terminateNow }
         guard !terminating else { return .terminateLater }
@@ -28,12 +32,12 @@ import ZionControl
     var body: some Scene {
         WindowGroup(id: "main") {
             RootView(model: model)
-                .onAppear { delegate.model = model }
+                .onAppear { delegate.model = model; model.startControl() }
         }
         .defaultSize(width: 920, height: 650)
         .commands { CommandGroup(after: .newItem) { Button("导入 JSON 配置…") { model.importJSON() }.keyboardShortcut("i", modifiers: [.command, .shift]) } }
         MenuBarExtra("Zion", systemImage: model.connection.phase.connected ? "shield.lefthalf.filled" : "shield") {
-            MenuContent(model: model).onAppear { delegate.model = model }
+            MenuContent(model: model).onAppear { delegate.model = model; model.startControl() }
         }
     }
 }

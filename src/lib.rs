@@ -33,3 +33,6 @@ pub mod packet;
 /// The native C bridge embeds the packet engine without a loopback proxy process.
 #[cfg(feature = "packet-tunnel")]
 pub mod packet_ffi;
+
+/// Native app commands expose a versioned local control interface for users and agents.
+pub mod app_cli;

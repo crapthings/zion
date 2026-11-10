@@ -97,7 +97,7 @@ private struct OverviewView: View {
                 }
                 BackendPicker(model: model)
                 if model.connection.needsRecovery {
-                    Surface { HStack { Label("发现上次连接留下的网络恢复记录。", systemImage: "arrow.counterclockwise"); Spacer(); Button("恢复代理设置") { Task { await model.connection.recover() } } } }
+                    Surface { HStack { Label("发现上次连接留下的网络恢复记录。", systemImage: "arrow.counterclockwise"); Spacer(); Button("恢复代理设置") { Task { await model.recover() } } } }
                 }
             }.padding(32).frame(maxWidth: 940)
         }.background(Color(nsColor: .windowBackgroundColor))
@@ -156,7 +156,7 @@ private struct SettingsView: View {
                 BackendPicker(model: model)
                 LabeledContent("实际运行", value: model.connection.phase.connected ? (model.connection.activeBackend?.title ?? "尚未连接") : "尚未连接")
                 LabeledContent("本地监听", value: model.connection.endpoint?.description ?? "连接时自动分配")
-                if model.connection.needsRecovery { Button("恢复上次网络设置") { Task { await model.connection.recover() } } }
+                if model.connection.needsRecovery { Button("恢复上次网络设置") { Task { await model.recover() } } }
             }
             Section("配置") {
                 Text("服务器信息保存在本机，密码独立保存在钥匙串。").foregroundStyle(.secondary)
