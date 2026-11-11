@@ -249,10 +249,11 @@ async fn run(args: Args, shutdown: CancellationToken) -> anyhow::Result<()> {
 
 /// Confirm remote authentication before announcing a bound local listener to the GUI.
 async fn run_client(
-    config: Config,
+    mut config: Config,
     shutdown: CancellationToken,
     machine: bool,
 ) -> anyhow::Result<()> {
+    config.traffic_events = machine;
     let server = Server::bind(config.clone()).await?;
     if machine {
         let tunnel = config

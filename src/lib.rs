@@ -40,3 +40,10 @@ pub mod app_cli;
 /// TUN devices connect tun-rs packet I/O to the shared authenticated IP engine.
 #[cfg(all(feature = "tun-device", any(target_os = "macos", target_os = "linux")))]
 pub mod tun;
+
+/// Local socket ownership identifies originating applications.
+mod process;
+/// Ordered process rules select explicit per-session egress.
+pub mod routing;
+/// Session telemetry counts traffic without capturing payloads.
+mod traffic;

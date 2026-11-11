@@ -481,3 +481,77 @@ fn transport_configuration_is_strict_and_backward_compatible() {
         );
     }
 }
+
+/// Real supervised SOCKS traffic emits exact payload counters and its routing decision on stdout.
+#[tokio::test]
+async fn machine_traffic_reports_policy_process_and_payload_counters() {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let pair = Pair::open(true, false).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let target = listener.local_addr().unwrap();
+    let echo = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut data = Vec::new();
+        socket.read_to_end(&mut data).await.unwrap();
+        socket.write_all(&data).await.unwrap();
+        socket.shutdown().await.unwrap();
+    });
+    let mut child = machine_client(&pair, "shared-secret-for-tests").await;
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let line = timeout(Duration::from_secs(5), lines.next_line())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let zion::control::Event::Ready { listen } = serde_json::from_str(&line).unwrap() else {
+        panic!("expected ready");
+    };
+    let mut socket = tokio::net::TcpStream::connect(listen).await.unwrap();
+    socket.write_all(&[5, 1, 0]).await.unwrap();
+    let mut method = [0; 2];
+    socket.read_exact(&mut method).await.unwrap();
+    assert_eq!(method, [5, 0]);
+    let mut request = vec![5, 1, 0];
+    request.extend(
+        fast_socks5::util::target_addr::TargetAddr::Ip(target)
+            .to_be_bytes()
+            .unwrap(),
+    );
+    socket.write_all(&request).await.unwrap();
+    let mut header = [0; 4];
+    timeout(Duration::from_secs(5), socket.read_exact(&mut header))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&header[..3], &[5, 0, 0]);
+    let mut bound = vec![0; if header[3] == 1 { 6 } else { 18 }];
+    socket.read_exact(&mut bound).await.unwrap();
+    socket.write_all(b"counted payload").await.unwrap();
+    socket.shutdown().await.unwrap();
+    let mut response = Vec::new();
+    timeout(Duration::from_secs(5), socket.read_to_end(&mut response))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response, b"counted payload");
+    echo.await.unwrap();
+    let record = timeout(Duration::from_secs(5), async {
+        loop {
+            let line = lines.next_line().await.unwrap().unwrap();
+            let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if value["event"] == "traffic" && value["status"] == "closed" {
+                break value;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(record["up"], 15);
+    assert_eq!(record["down"], 15);
+    assert_eq!(record["policy"], "proxy");
+    assert_eq!(record["rule"], "FINAL");
+    assert_eq!(record["target"], target.to_string());
+    #[cfg(target_os = "macos")]
+    assert_eq!(record["process"]["pid"], std::process::id());
+    child.kill().await.unwrap();
+}

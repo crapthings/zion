@@ -4,10 +4,10 @@ import ZionControl
 
 /// Navigation groups the primary workflow separately from auxiliary pages added later.
 private enum Page: String, CaseIterable, Identifiable {
-    case overview = "概览", servers = "服务器", logs = "日志", settings = "设置"
+    case overview = "概览", servers = "服务器", traffic = "进程流量", routing = "规则与策略", logs = "日志", settings = "设置"
     var id: Self { self }
     var symbol: String {
-        switch self { case .overview: "shield"; case .servers: "server.rack"; case .logs: "doc.text.magnifyingglass"; case .settings: "gearshape" }
+        switch self { case .overview: "shield"; case .servers: "server.rack"; case .traffic: "chart.bar.xaxis"; case .routing: "line.3.horizontal.decrease.circle"; case .logs: "doc.text.magnifyingglass"; case .settings: "gearshape" }
     }
 }
 
@@ -29,6 +29,8 @@ struct RootView: View {
             }
         }
         .onChange(of: model.connection.phase) { _, _ in if model.setupGuide.isPresented { model.setupGuide.refresh() } }
+        .buttonStyle(.borderless)
+        .textFieldStyle(.plain)
         .frame(minWidth: 780, minHeight: 600)
         .sheet(item: $model.editing) { profile in ProfileEditor(model: model, initial: profile, initialPassword: model.editingPassword) }
         .alert("Zion", isPresented: Binding(get: { model.alert != nil }, set: { if !$0 { model.alert = nil } })) { Button("好") { model.alert = nil } } message: { Text(model.alert ?? "") }
@@ -40,36 +42,37 @@ struct RootView: View {
             List(Page.allCases, selection: $page) { item in Label(item.rawValue, systemImage: item.symbol).tag(item) }
                 .listStyle(.sidebar)
                 .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
-                .safeAreaInset(edge: .bottom) {
-                    HStack(spacing: 8) {
-                        Circle().fill(model.connection.phase.connected ? Color.green : Color.secondary.opacity(0.4)).frame(width: 7, height: 7)
-                        Text("Zion").font(.system(.subheadline, design: .rounded).weight(.semibold))
-                        Spacer()
-                        Text("0.1").foregroundStyle(.tertiary)
-                    }.padding(18)
-                }
         } detail: {
             Group {
                 switch page ?? .overview {
                 case .overview: OverviewView(model: model)
                 case .servers: ServerListView(model: model)
+                case .traffic: TrafficView(model: model)
+                case .routing: RoutingView(model: model)
                 case .logs: LogsView(model: model)
                 case .settings: SettingsView(model: model)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .navigationTitle((page ?? .overview).rawValue)
-            .toolbar { ToolbarItem { Button { model.importJSON() } label: { Label("导入 JSON", systemImage: "square.and.arrow.down") }.disabled(!model.connection.phase.idle) } }
+            .toolbar {
+                if page == .overview || page == .servers {
+                    ToolbarItem {
+                        Button { model.importJSON() } label: { Label("导入", systemImage: "square.and.arrow.down") }
+                            .help("导入服务器 JSON").disabled(!model.connection.phase.idle)
+                    }
+                }
+            }
         }
     }
 }
 
-/// A reusable surface creates hierarchy using native colors instead of decorative imagery.
+/// A full-width section separates related controls with spacing instead of a surrounding border.
 struct Surface<Content: View>: View {
     @ViewBuilder let content: Content
     var body: some View {
-        content.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-            .background(.background, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.primary.opacity(0.07), lineWidth: 1))
+        content.padding(.vertical, InterfaceSpacing.medium)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -79,43 +82,46 @@ private struct OverviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                HStack(alignment: .center, spacing: 20) {
+            VStack(alignment: .leading, spacing: InterfaceSpacing.medium) {
+                HStack(alignment: .center, spacing: InterfaceSpacing.medium) {
                     Image(systemName: model.connection.phase.connected ? "shield.lefthalf.filled" : "shield")
-                        .font(.system(size: 40, weight: .light)).foregroundStyle(model.connection.phase.connected ? Color.accentColor : Color.secondary)
-                        .frame(width: 68, height: 68).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 20))
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text(model.connection.statusTitle).font(.system(size: 27, weight: .semibold, design: .rounded))
-                        Text(model.connection.phase == .recoveryRequired ? "请先恢复系统代理设置，再重新连接。" : model.connection.phase.connected ? "跟随系统代理的应用正在通过 Zion 连接。" : "选择服务器，开始连接。")
+                        .font(.system(size: 30, weight: .light)).foregroundStyle(model.connection.phase.connected ? Color.accentColor : Color.secondary)
+                        .frame(width: 48, height: 48)
+                    VStack(alignment: .leading, spacing: InterfaceSpacing.small) {
+                        Text(model.connection.statusTitle).font(.system(size: 24, weight: .semibold, design: .rounded))
+                        Text(model.connection.phase == .recoveryRequired ? "需要恢复代理设置" : model.connection.phase.connected ? (model.connection.activeBackend?.title ?? "已连接") : model.connection.selectedBackend.title)
                             .foregroundStyle(.secondary)
                     }
-                    Spacer(minLength: 8)
+                    Spacer(minLength: InterfaceSpacing.small)
                     Button(model.connection.phase == .recoveryRequired ? "恢复网络" : model.connection.phase.connected ? "断开连接" : model.connection.phase.busy ? "取消" : "连接") { Task { await model.toggle() } }
-                        .buttonStyle(.borderedProminent).controlSize(.large)
+                        .buttonStyle(.borderless).controlSize(.large)
                         .disabled(model.connection.phase == .authorizing || model.connection.phase == .disconnecting || (model.connection.phase.idle && !model.canConnect))
-                }.padding(.vertical, 8)
+                }.padding(.vertical, InterfaceSpacing.small)
                 if let error = model.connection.lastError { Label(error, systemImage: "exclamationmark.circle").font(.callout).foregroundStyle(.orange).textSelection(.enabled) }
                 Surface {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("当前服务器").font(.subheadline).foregroundStyle(.secondary)
-                            Text(model.selectedProfile?.name ?? "尚未添加服务器").font(.title3.weight(.semibold))
-                            if let profile = model.selectedProfile { Text(profile.server + " · " + profile.transport.title).font(.callout).foregroundStyle(.secondary) }
+                    HStack(spacing: InterfaceSpacing.small) {
+                        VStack(alignment: .leading, spacing: InterfaceSpacing.small) {
+                            Text("服务器").font(.caption).foregroundStyle(.secondary)
+                            if model.document.profiles.isEmpty {
+                                Text("未添加").font(.headline)
+                            } else {
+                                WorkspacePicker(title: "服务器", selectionTitle: model.selectedProfile?.name ?? "选择服务器", selection: Binding(get: { model.document.selectedID }, set: { id in if let profile = model.document.profiles.first(where: { $0.id == id }) { model.select(profile) } })) {
+                                    ForEach(model.document.profiles) { Text($0.name).tag(Optional($0.id)) }
+                                }.labelsHidden().frame(maxWidth: .infinity, alignment: .leading).disabled(!model.connection.phase.idle)
+                            }
+                            if let profile = model.selectedProfile {
+                                Text(profile.server + " · " + profile.transport.title).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
                         }
                         Spacer()
-                        if !model.document.profiles.isEmpty {
-                            Picker("服务器", selection: Binding(get: { model.document.selectedID }, set: { id in if let profile = model.document.profiles.first(where: { $0.id == id }) { model.select(profile) } })) {
-                                ForEach(model.document.profiles) { Text($0.name).tag(Optional($0.id)) }
-                            }.labelsHidden().frame(maxWidth: 210).disabled(!model.connection.phase.idle)
-                        }
                         Button { model.edit(model.selectedProfile) } label: { Image(systemName: model.selectedProfile == nil ? "plus" : "slider.horizontal.3") }.help("配置服务器").disabled(!model.connection.phase.idle)
                     }
                 }
                 BackendPicker(model: model)
                 if model.connection.needsRecovery {
-                    Surface { HStack { Label("发现上次连接留下的网络恢复记录。", systemImage: "arrow.counterclockwise"); Spacer(); Button("恢复代理设置") { Task { await model.recover() } } } }
+                    Surface { HStack(spacing: InterfaceSpacing.small) { Label("代理设置待恢复", systemImage: "arrow.counterclockwise"); Spacer(); Button("恢复代理设置") { Task { await model.recover() } } } }
                 }
-            }.padding(32).frame(maxWidth: 940)
+            }.padding(InterfaceSpacing.large).frame(maxWidth: .infinity, alignment: .leading)
         }.background(Color(nsColor: .windowBackgroundColor))
     }
 }
@@ -126,20 +132,24 @@ private struct ServerListView: View {
     var body: some View {
         VStack(spacing: 0) {
             if model.document.profiles.isEmpty {
-                ContentUnavailableView { Label("添加第一台服务器", systemImage: "server.rack") } description: { Text("使用密码或客户端证书连接，不需要用户名。") } actions: { Button("添加服务器") { model.edit() }.buttonStyle(.borderedProminent) }
+                VStack(alignment: .leading, spacing: InterfaceSpacing.medium) {
+                    Label("暂无服务器", systemImage: "server.rack").foregroundStyle(.secondary)
+                    Button("添加服务器", systemImage: "plus") { model.edit() }
+                }.padding(InterfaceSpacing.large)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 List(model.document.profiles) { profile in
-                    HStack(spacing: 14) {
+                    HStack(spacing: InterfaceSpacing.medium) {
                         Image(systemName: "server.rack").font(.title2).foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 5) { Text(profile.name).font(.headline); Text(profile.server + " · " + profile.transport.title).font(.callout).foregroundStyle(.secondary) }
+                        VStack(alignment: .leading, spacing: InterfaceSpacing.small) { Text(profile.name).font(.headline); Text(profile.server + " · " + profile.transport.title).font(.callout).foregroundStyle(.secondary) }
                         Spacer()
                         if profile.id == model.document.selectedID { Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor) }
                         Button("选择") { model.select(profile) }.disabled(!model.connection.phase.idle)
                         Button { model.edit(profile) } label: { Image(systemName: "pencil") }.disabled(!model.connection.phase.idle)
-                    }.padding(.vertical, 10).contextMenu { Button("删除服务器", role: .destructive) { model.remove(profile) }.disabled(!model.connection.phase.idle) }
-                }.listStyle(.inset)
+                    }.padding(.vertical, InterfaceSpacing.medium).contextMenu { Button("删除服务器", role: .destructive) { model.remove(profile) }.disabled(!model.connection.phase.idle) }
+                }.listStyle(.plain)
             }
-            HStack { Text("密码保存在 macOS 钥匙串中。").font(.caption).foregroundStyle(.secondary); Spacer(); Button("添加服务器", systemImage: "plus") { model.edit() }.disabled(!model.connection.phase.idle) }.padding(20)
+            HStack(spacing: InterfaceSpacing.small) { Text("\(model.document.profiles.count) 台服务器").font(.caption).foregroundStyle(.secondary); Spacer(); Button("添加服务器", systemImage: "plus") { model.edit() }.disabled(!model.connection.phase.idle) }.padding(.horizontal, InterfaceSpacing.medium).padding(.vertical, InterfaceSpacing.small)
         }
     }
 }
@@ -148,20 +158,26 @@ private struct ServerListView: View {
 private struct SettingsView: View {
     let model: AppModel
     var body: some View {
-        Form {
-            Section("网络") {
+        ScrollView {
+            VStack(alignment: .leading, spacing: InterfaceSpacing.large) {
                 BackendPicker(model: model)
-                LabeledContent("实际运行", value: model.connection.phase.connected ? (model.connection.activeBackend?.title ?? "尚未连接") : "尚未连接")
-                LabeledContent("本地监听", value: model.connection.endpoint?.description ?? "连接时自动分配")
-                if model.connection.needsRecovery { Button("恢复上次网络设置") { Task { await model.recover() } } }
-            }
-            Section("配置") {
-                Text("服务器信息保存在本机，密码独立保存在钥匙串。").foregroundStyle(.secondary)
-                Button("打开配置目录") { try? FileManager.default.createDirectory(at: model.store.directory, withIntermediateDirectories: true); NSWorkspace.shared.open(model.store.directory) }
-            }
-            Section("引导") { Button("打开启动引导") { model.showSetup() } }
-            Section("关于") { LabeledContent("Zion", value: "0.1.0"); Text("原生 macOS 界面 · Rust 网络核心").foregroundStyle(.secondary) }
-        }.formStyle(.grouped).padding(16)
+                VStack(alignment: .leading, spacing: InterfaceSpacing.medium) {
+                    LabeledContent("实际运行", value: model.connection.phase.connected ? (model.connection.activeBackend?.title ?? "尚未连接") : "尚未连接")
+                    LabeledContent("本地监听", value: model.connection.endpoint?.description ?? "连接时自动分配")
+                    if model.connection.needsRecovery {
+                        Button("恢复网络") { Task { await model.recover() } }
+                    }
+                }
+                VStack(alignment: .leading, spacing: InterfaceSpacing.medium) {
+                    Button("打开配置目录", systemImage: "folder") {
+                        try? FileManager.default.createDirectory(at: model.store.directory, withIntermediateDirectories: true)
+                        NSWorkspace.shared.open(model.store.directory)
+                    }
+                    Button("启动引导", systemImage: "sparkles") { model.showSetup() }
+                }
+                LabeledContent("版本", value: "0.1.0").foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(InterfaceSpacing.large)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -170,22 +186,23 @@ struct BackendPicker: View {
     let model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("接管方式").font(.headline)
-            Picker("接管方式", selection: Binding(
+        VStack(alignment: .leading, spacing: InterfaceSpacing.medium) {
+            HStack(spacing: InterfaceSpacing.small) {
+                Text("接管方式").font(.headline)
+                Image(systemName: "info.circle").foregroundStyle(.secondary)
+                    .help(model.connection.selectedBackend.explanation + " 切换前需断开连接。")
+            }
+            WorkspacePicker(title: "接管方式", selectionTitle: model.connection.selectedBackend.title, selection: Binding(
                 get: { model.connection.selectedBackend },
                 set: { model.selectBackend($0) }
             )) {
                 ForEach(ConnectionBackend.allCases) { Text($0.title).tag($0) }
-            }.pickerStyle(.segmented).labelsHidden()
+            }
                 .disabled(!model.connection.phase.idle || model.connection.needsRecovery || model.helperInstallation.busy)
-            Text(model.connection.selectedBackend.explanation).font(.callout).foregroundStyle(.secondary)
             if let reason = model.connection.readiness(for: model.connection.selectedBackend).explanation {
-                Label(reason, systemImage: "info.circle").font(.callout).foregroundStyle(.orange)
+                Label("暂不可用", systemImage: "info.circle").font(.callout).foregroundStyle(.orange).help(reason)
             }
             if model.connection.selectedBackend == .helperTun { HelperInstallationView(model: model) }
-            Text("切换接管方式前需要先断开连接。系统代理只覆盖遵循系统 SOCKS 设置的应用。")
-                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }

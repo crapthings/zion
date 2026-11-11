@@ -37,27 +37,6 @@ public struct ServerProfile: Identifiable, Codable, Equatable, Sendable {
     /// Create an empty profile for a user-supplied server.
     public init() {}
 
-    /// Stored fields retain their existing names while older profiles default to the QUIC carrier.
-    private enum CodingKeys: String, CodingKey {
-        case id, name, server, transport, authentication, ca, certificate, privateKey, serverName, interface
-    }
-
-    /// Decode older profiles without inventing a transport for an unrecognized explicit value.
-    public init(from decoder: Decoder) throws {
-        self.init()
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        id = try values.decode(UUID.self, forKey: .id)
-        name = try values.decode(String.self, forKey: .name)
-        server = try values.decode(String.self, forKey: .server)
-        transport = values.contains(.transport) ? try values.decode(TunnelTransport.self, forKey: .transport) : .quic
-        authentication = try values.decode(Authentication.self, forKey: .authentication)
-        ca = try values.decode(String.self, forKey: .ca)
-        certificate = try values.decode(String.self, forKey: .certificate)
-        privateKey = try values.decode(String.self, forKey: .privateKey)
-        serverName = try values.decode(String.self, forKey: .serverName)
-        interface = try values.decode(String.self, forKey: .interface)
-    }
-
     /// Validate editable fields without weakening TLS authentication.
     public func validate() throws {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -100,10 +79,11 @@ public struct CoreConfiguration: Encodable, Sendable {
     public var serverName: String?
     public var interface: String?
     public var listen = "127.0.0.1:0"
+    public var routing = RoutingDocument()
 
     /// Wire keys match the existing flat Rust JSON schema.
     enum CodingKeys: String, CodingKey {
-        case server, transport, password, ca, cert, key, interface, listen
+        case server, transport, password, ca, cert, key, interface, listen, routing
         case serverName = "server_name"
     }
 }

@@ -119,6 +119,20 @@ import Testing
         #expect(secrets.values.isEmpty)
     }
 
+    /// File and command imports share strict validation and never silently discard global rules.
+    @Test func profileImportsUseCurrentSchema() throws {
+        let minimal = try ImportedConfiguration.parse(Data(#"{"server":"localhost:8443","password":"secret"}"#.utf8))
+        #expect(minimal.server == "localhost:8443" && minimal.transport == nil)
+        for source in [
+            #"{"server":"localhost:8443","password":"secret","routing":{"default_policy":"direct","rules":[]}}"#,
+            #"{"server":"localhost:8443","password":"","transport":"quic"}"#,
+            #"{"server":"localhost:8443","password":"secret","transport":null}"#,
+            #"{"server":"localhost:8443","password":"secret","unexpected":true}"#
+        ] {
+            #expect(throws: (any Error).self) { try ImportedConfiguration.parse(Data(source.utf8)) }
+        }
+    }
+
     /// CLI log reads and copied diagnostics expose sanitized session entries with bounded limits.
     @Test func logsShareSanitizedEntriesWithCLI() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

@@ -19,6 +19,8 @@ private struct CoreEvent: Decodable {
 @MainActor public final class CoreProcess: EngineServing {
     public var onLog: (@MainActor (String) -> Void)?
     public var onExit: (@MainActor (Int32) -> Void)?
+    public var onTraffic: (@MainActor (TrafficRecord) -> Void)?
+    public var onTrafficEnd: (@MainActor () -> Void)?
     private let executable: URL
     private var process: Process?
     private var stdoutPipe: Pipe?
@@ -42,6 +44,7 @@ private struct CoreEvent: Decodable {
         sanitizer = DiagnosticSanitizer(password: configuration.password)
         onLog?("隧道传输：" + configuration.transport.title)
         let data = try JSONEncoder().encode(configuration)
+        guard data.count <= 64 * 1024 else { throw ControlError("连接配置超过 64 KiB，请减少进程规则或路径长度。") }
         let token = UUID()
         generation = token
         return try await withCheckedThrowingContinuation { continuation in
@@ -111,6 +114,7 @@ private struct CoreEvent: Decodable {
             generation = UUID()
             clearHandlers()
             self.process = nil
+            onTrafficEnd?()
         }
     }
 
@@ -127,7 +131,7 @@ private struct CoreEvent: Decodable {
         }
         if diagnostic { errors.append(data) } else { output.append(data) }
         var buffer = diagnostic ? errors : output
-        guard buffer.count <= 64 * 1024 else {
+        guard !buffer.split(separator: 10, omittingEmptySubsequences: false).contains(where: { $0.count > 64 * 1024 }) else {
             fail(ControlError("核心输出超过限制，连接已停止。"))
             process?.terminate()
             return
@@ -152,6 +156,9 @@ private struct CoreEvent: Decodable {
             return
         }
         switch event.event {
+        case "traffic":
+            guard let record = try? JSONDecoder().decode(TrafficRecord.self, from: line) else { return }
+            onTraffic?(record)
         case "ready":
             do {
                 let endpoint = try ProxyEndpoint(listen: event.listen ?? "")
@@ -171,6 +178,7 @@ private struct CoreEvent: Decodable {
         fail(ControlError("代理核心已退出（\(status)），可在日志中查看详情。"))
         clearHandlers()
         process = nil
+        onTrafficEnd?()
         onExit?(status)
     }
 
@@ -190,13 +198,9 @@ private struct CoreEvent: Decodable {
         stderrPipe = nil
     }
 
-    /// Resolve the bundled helper before considering an explicit development binary.
+    /// Use the packaged core unless development explicitly supplies another executable.
     public static func defaultExecutable() -> URL {
         if let path = ProcessInfo.processInfo.environment["ZION_CORE_PATH"] { return URL(fileURLWithPath: path) }
-        let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/zion-core")
-        if FileManager.default.isExecutableFile(atPath: bundled.path) { return bundled }
-        var root = URL(fileURLWithPath: #filePath)
-        for _ in 0..<4 { root.deleteLastPathComponent() }
-        return root.appendingPathComponent("target/debug/zion")
+        return Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/zion-core")
     }
 }

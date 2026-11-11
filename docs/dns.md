@@ -41,6 +41,6 @@ Caches are in memory and discarded when the policy is rebuilt. There is no stale
 
 This setting resolves destination names received by the server. The client still uses its own system resolver to locate the Zion server. A destination already supplied as an IP is not resolved again.
 
-It does not intercept device-wide DNS, application DoH, or port 53 traffic. The QUIC tunnel is encrypted; ordinary DNS between the server and its upstream is not.
+It does not intercept device-wide DNS, application DoH, or port 53 traffic. The QUIC or TCP/TLS tunnel is encrypted; ordinary DNS between the server and its upstream is not.
 
 Tests use local UDP/TCP responders for TTL expiry, negative caching, peer failures, concurrency, IPv6 upstreams, and resolver sharing across real QUIC sessions. Run `cargo test --locked --test dns`.

@@ -13,19 +13,17 @@ struct SetupGuideView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    VStack(alignment: .leading, spacing: 9) {
-                        Text("开始使用 Zion").font(.system(size: 32, weight: .semibold, design: .rounded))
-                        Text("查看当前网络状态，选择如何连接。也可以跳过，稍后再设置。")
-                            .foregroundStyle(.secondary)
-                    }.padding(.bottom, 4)
+                VStack(alignment: .leading, spacing: InterfaceSpacing.medium) {
+                    Text("欢迎使用 Zion").font(.system(size: 26, weight: .semibold, design: .rounded))
+                        .padding(.bottom, InterfaceSpacing.small)
                     serverSection
                     proxySection
-                    enhancedSection
+                    DisclosureGroup("增强模式") { enhancedSection.padding(.top, InterfaceSpacing.medium) }
+                        .font(.subheadline).foregroundStyle(.secondary)
                     if model.connection.needsRecovery {
                         Surface {
-                            HStack {
-                                Label("有待恢复的系统代理设置。", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                            HStack(spacing: InterfaceSpacing.small) {
+                                Label("代理设置待恢复", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                                 Spacer()
                                 Button("恢复网络") { Task { await model.recover(); model.setupGuide.refresh() } }
                                     .disabled(model.connection.phase.busy)
@@ -38,16 +36,15 @@ struct SetupGuideView: View {
                     if let error = model.setupGuide.preferenceError {
                         Text(error).font(.caption).foregroundStyle(.secondary)
                     }
-                }.padding(32).frame(maxWidth: 800).frame(maxWidth: .infinity)
+                }.padding(InterfaceSpacing.large).frame(maxWidth: .infinity, alignment: .leading)
             }
             Divider()
-            HStack(spacing: 16) {
-                Toggle("每次启动显示引导", isOn: Binding(get: { model.setupGuide.showOnLaunch }, set: { model.setupGuide.showOnLaunch = $0 }))
+            HStack(spacing: InterfaceSpacing.medium) {
+                Toggle("启动时显示", isOn: Binding(get: { model.setupGuide.showOnLaunch }, set: { model.setupGuide.showOnLaunch = $0 }))
                     .toggleStyle(.checkbox).font(.callout)
                 Spacer()
-                Button("跳过") { model.finishSetup() }
-                Button("继续") { model.finishSetup() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-            }.padding(24)
+                Button("完成") { model.finishSetup() }.buttonStyle(.borderless).keyboardShortcut(.defaultAction)
+            }.padding(.horizontal, InterfaceSpacing.medium).padding(.vertical, InterfaceSpacing.medium)
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { model.setupGuide.refresh(); model.helperInstallation.refresh() }
@@ -56,16 +53,16 @@ struct SetupGuideView: View {
     /// Reuse the normal profile editor rather than inventing an onboarding-only credential store.
     private var serverSection: some View {
         Surface {
-            HStack(spacing: 16) {
+            HStack(spacing: InterfaceSpacing.medium) {
                 Image(systemName: "server.rack").font(.title2).foregroundStyle(.secondary).frame(width: 32)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(model.selectedProfile?.name ?? "添加服务器").font(.headline)
-                    Text(model.selectedProfile.map { $0.server + " · " + $0.transport.title } ?? "连接前需要一台配置好的服务器。").font(.callout).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: InterfaceSpacing.small) {
+                    Text(model.selectedProfile?.name ?? "服务器").font(.headline)
+                    Text(model.selectedProfile.map { $0.server + " · " + $0.transport.title } ?? "尚未配置").font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button(model.selectedProfile == nil ? "添加服务器" : "编辑") { model.edit(model.selectedProfile) }
                     .disabled(!model.canConfigureSetupProxy)
-                Button("导入 JSON") { model.importJSON() }.disabled(!model.canConfigureSetupProxy)
+                Button("导入") { model.importJSON() }.disabled(!model.canConfigureSetupProxy)
             }
         }
     }
@@ -73,23 +70,22 @@ struct SetupGuideView: View {
     /// Report system proxy flags separately from the core's authenticated connection state.
     private var proxySection: some View {
         Surface {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: InterfaceSpacing.medium) {
+                HStack(spacing: InterfaceSpacing.medium) {
                     Image(systemName: "network").font(.title2).foregroundStyle(Color.accentColor).frame(width: 32)
                     Text("系统代理").font(.headline)
                     Spacer()
-                    Text(zionProxyActive ? "Zion 连接已建立" : "Zion 未连接").font(.callout).foregroundStyle(zionProxyActive ? Color.green : .secondary)
+                    Text(zionProxyActive ? "已连接" : "未连接").font(.callout).foregroundStyle(zionProxyActive ? Color.green : .secondary)
                 }
                 if let snapshot = model.setupGuide.snapshot {
-                    Text(snapshot.proxies.isEmpty ? "当前未检测到启用的系统代理。" : "系统当前启用：" + snapshot.proxies.map(\.rawValue).joined(separator: "、"))
+                    Text(snapshot.proxies.isEmpty ? "系统设置 · 未启用" : "系统设置 · " + snapshot.proxies.map(\.rawValue).joined(separator: "、"))
                         .font(.callout).textSelection(.enabled)
-                } else { Text("系统代理状态待检测。").font(.callout).foregroundStyle(.secondary) }
-                Text("适用于遵循 macOS SOCKS 设置的应用。连接时暂时替换现有代理设置，断开后恢复。")
-                    .font(.callout).foregroundStyle(.secondary)
-                HStack {
-                    Button(zionProxyActive ? "Zion 已连接" : "连接并启用系统代理") { Task { await model.connectFromSetup() } }
+                } else { Text("待检测").font(.callout).foregroundStyle(.secondary) }
+                HStack(spacing: InterfaceSpacing.small) {
+                    Button(zionProxyActive ? "已连接" : "连接") { Task { await model.connectFromSetup() } }
                         .disabled(!model.canConfigureSetupProxy)
-                    Button("刷新状态", systemImage: "arrow.clockwise") { model.setupGuide.refresh() }
+                    Button("刷新", systemImage: "arrow.clockwise") { model.setupGuide.refresh() }
+                        .labelStyle(.iconOnly).help("刷新网络状态")
                     if let snapshot = model.setupGuide.snapshot {
                         Spacer()
                         Text(snapshot.date, style: .time).font(.caption).foregroundStyle(.tertiary)
@@ -105,23 +101,17 @@ struct SetupGuideView: View {
     /// Expose existing virtual interfaces without treating them as a working Zion tunnel.
     private var enhancedSection: some View {
         Surface {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: InterfaceSpacing.medium) {
+                HStack(spacing: InterfaceSpacing.medium) {
                     Image(systemName: "point.3.connected.trianglepath.dotted").font(.title2).foregroundStyle(.secondary).frame(width: 32)
-                    Text("增强模式").font(.headline)
+                    Text("TUN").font(.headline)
                     Spacer()
                     Text("尚未就绪").font(.callout).foregroundStyle(.secondary)
                 }
                 if let snapshot = model.setupGuide.snapshot {
-                    Text(snapshot.virtualInterfaces.isEmpty ? "未检测到已启用且配置地址的虚拟接口。" : "检测到虚拟接口：" + snapshot.virtualInterfaces.joined(separator: "、"))
-                        .font(.callout).textSelection(.enabled)
-                    if !snapshot.virtualInterfaces.isEmpty {
-                        Text("这些接口可能属于 VPN 或其他应用，不代表 Zion 已接管流量。")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                } else { Text("虚拟接口状态待检测。").font(.callout).foregroundStyle(.secondary) }
-                Text("增强模式用于接管不遵循系统代理的应用。当前 TUN 网络接入尚未完成，安装辅助组件后仍不可启用。")
-                    .font(.callout).foregroundStyle(.secondary)
+                    Text(snapshot.virtualInterfaces.isEmpty ? "无活跃虚拟接口" : "虚拟接口：" + snapshot.virtualInterfaces.joined(separator: "、"))
+                        .font(.callout).textSelection(.enabled).help("检测到的接口可能属于其他应用，不代表 Zion 已接管流量。")
+                } else { Text("待检测").font(.callout).foregroundStyle(.secondary) }
                 HelperInstallationView(model: model)
             }
         }

@@ -2,19 +2,23 @@ import Foundation
 import Testing
 @testable import ZionControl
 
-/// Carrier tests preserve legacy storage and the exact core-configuration wire value.
+/// Carrier tests require the current stored schema and preserve the exact core wire value.
 @Suite @MainActor struct TransportTests {
-    /// Older profiles retain their identity and original QUIC mode when the new field is absent.
-    @Test func oldProfileDefaultsToQuic() throws {
+    /// Current profiles round-trip while incomplete or invalid stored carriers fail explicitly.
+    @Test func profileRequiresExplicitStoredTransport() throws {
         let profile = ServerProfile()
-        var value = try JSONSerialization.jsonObject(with: JSONEncoder().encode(profile)) as! [String: Any]
+        let data = try JSONEncoder().encode(profile)
+        #expect(try JSONDecoder().decode(ServerProfile.self, from: data) == profile)
+        var value = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         value.removeValue(forKey: "transport")
-        let restored = try JSONDecoder().decode(ServerProfile.self, from: JSONSerialization.data(withJSONObject:value))
-        #expect(restored.id == profile.id && restored.transport == .quic)
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(ServerProfile.self, from: JSONSerialization.data(withJSONObject: value))
+        }
         for invalid in ["unknown" as Any, NSNull()] {
             value["transport"] = invalid
-            let data = try JSONSerialization.data(withJSONObject:value)
-            #expect(throws: (any Error).self) { try JSONDecoder().decode(ServerProfile.self,from:data) }
+            #expect(throws: (any Error).self) {
+                try JSONDecoder().decode(ServerProfile.self, from: JSONSerialization.data(withJSONObject: value))
+            }
         }
     }
 

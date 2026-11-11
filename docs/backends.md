@@ -38,16 +38,28 @@ Swift removes the send handle before teardown and rejects late events from previ
 
 ## Build and test
 
+The standard `scripts/build-macos.py` package uses the supervised SOCKS core and does not link the optional packet engine. It includes the helper for registration management; that helper does not provide a working TUN backend.
+
+Test the current app/core integration after packaging:
+
+```sh
+python3 scripts/build-macos.py
+ZION_INTEGRATION_CORE="$PWD/target/macos/Zion.app/Contents/Helpers/zion-core" \
+ZION_CONTROL_CLI="$PWD/target/macos/Zion.app/Contents/Helpers/zion-core" \
+swift test --package-path macos
+```
+
+To exercise the optional Rust device and native bridge independently:
+
 ```sh
 cargo test --locked --features tun-device
-python3 scripts/build-macos.py
+cargo build --locked --release --features tun-device --lib
+swift package --package-path macos clean
 ZION_PACKET_LIBRARY="$PWD/target/release/libzion.a" \
 ZION_INTEGRATION_CORE="$PWD/target/macos/Zion.app/Contents/Helpers/zion-core" \
 swift test --package-path macos
 ```
 
-The packaging script enables `tun-device` (which includes `packet-tunnel`) and links the static library. It fingerprints the archive and cleans Swift build products when it changes, preventing reuse of an older embedded core. Standalone Swift builds need `ZION_PACKET_LIBRARY` to enable native linking. Real-core tests require `ZION_INTEGRATION_CORE`; native engine coverage also requires the library.
+Clean Swift build products when replacing the external static archive: SwiftPM does not track its contents as a source dependency. Default packaging explicitly disables this optional linkage.
 
 Tests cover raw IPv4/IPv6 TCP and UDP, half-close, empty datagrams, queue limits, authentication, and native start/stop/restart. Backend controller tests use substitute adapters. No test installs a helper or extension, creates utun, or changes system networking.
-
-Remaining app integration includes authenticated device handoff, endpoint loop prevention, route and DNS policy, network changes, and crash recovery.

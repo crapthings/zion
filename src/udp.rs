@@ -132,6 +132,7 @@ pub async fn relay(
     local_ip: IpAddr,
     requested: TargetAddr,
     config: &Config,
+    flow: &crate::traffic::Flow,
 ) -> anyhow::Result<()> {
     let mut association = match Association::bind(peer, local_ip, requested, config).await {
         Ok(association) => association,
@@ -154,9 +155,16 @@ pub async fn relay(
             _ = sleep_until(expires) => return Ok(()),
             packet = association.client.recv_from(&mut incoming) => {
                 let (length, source) = packet?;
-                association.send_outbound(&incoming[..length], source, config).await?.record("local outbound")
+                let sent = association.send_outbound(&incoming[..length], source, config).await?.record("local outbound");
+                if sent { flow.add(length as u64, 0); }
+                sent
             }
-            packet = association.channel.receive(&mut outgoing) => association.send_response(&packet?).await.record("local response"),
+            packet = association.channel.receive(&mut outgoing) => {
+                let packet = packet?;
+                let sent = association.send_response(&packet).await.record("local response");
+                if sent { flow.add(0, packet.len() as u64); }
+                sent
+            },
         };
         if activity {
             expires = Instant::now() + config.udp_idle_timeout;

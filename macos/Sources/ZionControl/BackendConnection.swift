@@ -38,8 +38,7 @@ import Observation
 
     /// Report the selected transport's own readiness without treating another backend as its fallback.
     public func readiness(for backend: ConnectionBackend) -> BackendReadiness {
-        if backend == .systemProxy { return .ready }
-        if let driver = enhanced[backend] { return driver.readiness }
+        if backend != .systemProxy, let driver = enhanced[backend] { return driver.readiness }
         switch backend {
         case .systemProxy: return .ready
         case .networkExtension: return .unavailable("NetworkExtension 提供器尚未接入，当前可保存此选择。")

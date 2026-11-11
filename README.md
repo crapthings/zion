@@ -1,72 +1,57 @@
 # Zion
 
-*Across the noise, a quiet passage.*
+A Rust proxy core with a native macOS app for managing which processes use a proxy.
 
-A small Rust core and a native macOS companion, built around simple configuration, familiar foundations, and room to grow.
+## Current features
 
-Tokio keeps time. Quinn carries the streams. Rustls guards the crossing.
+- TCP and UDP forwarding over QUIC or TCP/TLS, with IPv4 and IPv6 support.
+- Password authentication, client certificates, or both; verified server identity.
+- macOS system SOCKS proxy controls, Keychain credentials, and network-settings recovery.
+- Ordered process-name/path rules: proxy, direct, or reject, plus a default policy.
+- Per-process traffic and connection decisions, retaining up to 500 connections in memory.
+- JSON/YAML configuration and a local app-control CLI.
 
-## Inside
+Process routing covers connections entering Zion's SOCKS listener. The app does not capture all device traffic. NetworkExtension and Helper TUN are not usable connection backends; helper registration and the optional packet/TUN library are separate from system-proxy operation.
 
-- TCP and UDP forwarding over UDP/QUIC or TCP/TLS, with IPv4 and IPv6 support.
-- Minimal JSON or YAML configuration, using passwords, client certificates, or both.
-- System DNS or explicit server-side resolvers, with shared TTL caches.
-- A SwiftUI macOS app with Keychain storage, system proxy controls, and a menu bar presence.
-- An optional IP packet engine with a tun-rs device adapter for macOS and Linux.
+## Start the macOS app
 
-Zion is young. The system proxy works today; NetworkExtension and helper-based TUN are selectable in the interface, but their system adapters are still unfinished. Full-device traffic capture is not yet available.
-
-## Begin
-
-Requires Rust 1.91 or later.
+Requires macOS 14+, Rust 1.91+, and an Xcode toolchain supporting Swift 6.
 
 ```sh
-cargo build --locked --release
+python3 scripts/build-macos.py
+open target/macos/Zion.app
 ```
 
-A minimal client configuration:
+Add a server, select system proxy, and connect. Disconnect before changing process rules; reconnect to apply them. See the [macOS guide](docs/macos-client.md).
 
-```yaml
-server: passage.example.com:8443
-password: replace-with-a-long-random-password
+## Run the core
+
+```sh
+cargo build --locked --release --bin zion
+./target/release/zion server -c server.yaml
+./target/release/zion client -c client.yaml
 ```
 
-The server needs a matching password and a TLS identity:
+Run the server and client on their respective hosts. Minimal files:
 
 ```yaml
+# server.yaml
 password: replace-with-a-long-random-password
 cert: server.pem
 key: server.key
 ```
 
-Run each on its respective host:
-
-```sh
-./target/release/zion server -c server.yaml
-./target/release/zion client -c client.yaml
+```yaml
+# client.yaml
+server: passage.example.com:8443
+password: replace-with-a-long-random-password
 ```
 
-The client listens on `127.0.0.1:1080`. Point a SOCKS5-capable application there. The server defaults to UDP/QUIC on `[::]:8443`; use `0.0.0.0:8443` on an IPv4-only host.
+The client listens at `127.0.0.1:1080`; the server defaults to QUIC on `[::]:8443`. The server certificate must be trusted and match its name. Add `ca: ca.pem` for a private CA. Set `transport: tls` on both sides for TCP/TLS, or `transport: both` on the server to accept either carrier.
 
-Set `transport: tls` on both sides for TCP/TLS. A server with `transport: both` accepts both carriers on the same port; allow TCP and UDP in its firewall. Clients select one carrier explicitly.
+See [configuration](docs/configuration.md), [examples](examples/), and the [app-control CLI](docs/cli.md).
 
-Server identity is always verified. The minimal example assumes a publicly trusted certificate matching the server name; for a private CA, add `ca: ca.pem` to the client. Certificate paths are relative to the configuration file.
-
-See [configuration](docs/configuration.md) and [examples](examples/) for certificate authentication, private identities, and additional options.
-
-## On macOS
-
-Requires macOS 14 or later and Xcode with command-line tools configured.
-
-```sh
-python3 scripts/build-macos.py
-```
-
-The locally signed app is written to `target/macos/Zion.app`, with the Rust core included. System proxy settings apply to applications that honor them. The interface is currently in Chinese.
-
-Manage servers and connections through the [app control CLI](docs/cli.md), or read about the [native app](docs/macos-client.md) and [backend integration](docs/backends.md).
-
-## Develop
+## Development
 
 ```sh
 cargo fmt --check
@@ -75,10 +60,16 @@ cargo test --locked --features tun-device
 swift test --package-path macos
 ```
 
-Swift tests require macOS. Native engine integration tests need the linked Rust library and a built core; setup is documented in [backend integration](docs/backends.md).
+Default macOS packaging uses the supervised SOCKS core. Optional packet-engine linking and integration tests are documented in [backends](docs/backends.md); the standalone device adapter is described in [TUN transport](docs/tun.md). Other references: [wire protocol](docs/protocol.md), [server DNS](docs/dns.md).
 
-Further notes: [wire protocol](docs/protocol.md), [DNS](docs/dns.md), and [dual stack](docs/dual-stack.md), and [TUN transport](docs/tun.md).
+## Clean build products
+
+```sh
+python3 scripts/clean-build.py
+```
+
+This removes Rust/Swift build caches, including cross-target builds, while preserving `target/macos/Zion.app`. Use `--all` to remove the packaged app too. Source, runtime configuration, and credentials are retained. Build again with `scripts/build-macos.py` when needed.
 
 ## License
 
-Available under either the [MIT License](LICENSE-MIT) or the [Apache License, Version 2.0](LICENSE-APACHE), at your option.
+[MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

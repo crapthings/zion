@@ -13,7 +13,7 @@ Build with `python3 scripts/build-macos.py`, then restart the app to load the co
 ./target/release/zion app disconnect
 ```
 
-Import accepts CLI client JSON/YAML and adds a new profile, selecting it immediately. It resolves credential paths relative to the file, stores the password in Keychain, and returns the profile UUID. The app chooses its own local listener; an imported `listen` value is not used. Import limits are 64 profiles and 128 UTF-8 bytes for the name.
+Import accepts the server-profile fields of client JSON/YAML and adds a new profile, selecting it immediately. Global `routing` is configured separately on the app rules page and is rejected by profile import. It resolves credential paths relative to the file, stores the password in Keychain, and returns the profile UUID. The app chooses its own local listener; an imported `listen` value is not used. Import limits are 64 profiles and 128 UTF-8 bytes for the name.
 
 Use `-c -` for stdin JSON; credential paths then resolve from the working directory. Password arguments are intentionally absent. Keychain and network-settings authorization may still require user interaction.
 

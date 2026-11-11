@@ -6,33 +6,33 @@ struct HelperInstallationView: View {
     let model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("TUN 辅助组件", systemImage: "shippingbox")
+        VStack(alignment: .leading, spacing: InterfaceSpacing.medium) {
+            HStack(spacing: InterfaceSpacing.small) {
+                Label("辅助组件", systemImage: "shippingbox").help("组件注册独立于 TUN 网络接管；安装后仍无法启用增强模式。")
                 Spacer()
                 if model.helperInstallation.busy { ProgressView().controlSize(.small) }
                 Text(model.helperInstallation.status.title).foregroundStyle(.secondary)
             }.font(.subheadline)
-            Text("当前可安装辅助组件；TUN 网络接管尚未完成，安装后仍不能启用全局代理。")
-                .font(.caption).foregroundStyle(.secondary)
             if !model.helperInstallation.bundled {
-                Label("此构建未包含辅助组件，请使用完整的 Zion.app。", systemImage: "info.circle")
+                Label("未包含辅助组件", systemImage: "info.circle")
                     .font(.caption).foregroundStyle(.orange)
             }
             if let error = model.helperInstallation.lastError {
                 Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled)
             }
-            HStack {
-                Button("安装辅助组件") { model.installHelper() }
+            HStack(spacing: InterfaceSpacing.small) {
+                Button("安装") { model.installHelper() }
                     .disabled(!model.canManageComponents || !model.helperInstallation.canInstall)
-                Button("前往系统授权", systemImage: "arrow.up.forward.app") { model.helperInstallation.openApprovalSettings() }
-                    .disabled(model.helperInstallation.status != .requiresApproval || model.helperInstallation.busy)
-                Button("刷新状态", systemImage: "arrow.clockwise") { model.helperInstallation.refresh() }
-                    .disabled(model.helperInstallation.busy)
+                if model.helperInstallation.status == .requiresApproval {
+                    Button("授权", systemImage: "arrow.up.forward.app") { model.helperInstallation.openApprovalSettings() }
+                        .disabled(model.helperInstallation.busy)
+                }
+                Button("刷新", systemImage: "arrow.clockwise") { model.helperInstallation.refresh() }
+                    .labelStyle(.iconOnly).help("刷新组件状态").disabled(model.helperInstallation.busy)
                 Spacer()
-                Button("卸载组件", role: .destructive) { Task { await model.uninstallHelper() } }
+                Button("卸载", role: .destructive) { Task { await model.uninstallHelper() } }
                     .disabled(!model.canManageComponents || !model.helperInstallation.canUninstall)
             }.controlSize(.small)
-        }.padding(14).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+        }.padding(.vertical, InterfaceSpacing.medium).frame(maxWidth: .infinity, alignment: .leading)
     }
 }

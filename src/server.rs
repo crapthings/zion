@@ -9,6 +9,8 @@ use tracing::{Instrument, debug, info, warn};
 #[derive(Clone, Debug)]
 pub struct Config {
     pub listen: SocketAddr,
+    pub routing: crate::routing::Routing,
+    pub traffic_events: bool,
     pub max_connections: NonZeroUsize,
     pub handshake_timeout: Duration,
     pub connect_timeout: Duration,
@@ -30,6 +32,8 @@ impl Default for Config {
             shutdown_grace: Duration::from_secs(5),
             resolver: crate::dns::Resolver::default(),
             tunnel: None,
+            routing: crate::routing::Routing::default(),
+            traffic_events: false,
         }
     }
 }
@@ -54,6 +58,7 @@ impl Server {
                 && !config.udp_idle_timeout.is_zero(),
             "operation timeouts must be positive"
         );
+        config.routing.validate()?;
         Ok(Self {
             listener: TcpListener::bind(config.listen).await?,
             config,

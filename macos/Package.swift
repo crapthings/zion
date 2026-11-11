@@ -4,7 +4,7 @@ import Foundation
 
 // Native packet linking is enabled only when a real Rust static library was supplied.
 let packetLibrary = ProcessInfo.processInfo.environment["ZION_PACKET_LIBRARY"]
-// Packet-enabled builds compile the same bridge into host and extension targets.
+// Optional native-bridge tests enable the Swift wrapper when a real Rust archive is supplied.
 let packetSettings: [SwiftSetting] = packetLibrary == nil ? [] : [.define("ZION_PACKET_CORE")]
 // The caller supplies an absolute library path to avoid accidental linking of an unrelated installation.
 let packetLinker: [LinkerSetting] = packetLibrary.map { [.unsafeFlags([$0])] } ?? []

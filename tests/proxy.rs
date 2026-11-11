@@ -533,3 +533,128 @@ async fn direct_tcp_hostname_uses_available_dns_families() {
         assert_eq!(stream.peer_addr().unwrap(), address);
     }
 }
+
+/// Explicit DIRECT bypasses a configured but unavailable tunnel for both TCP and UDP.
+#[tokio::test]
+async fn direct_policy_bypasses_unavailable_tunnel() {
+    let tunnel = support::Tunnel::start(Config::default());
+    let client = tunnel.client(&tunnel.directory(), "localhost");
+    drop(tunnel);
+    let config = Config {
+        tunnel: Some(client),
+        routing: zion::routing::Routing {
+            default_policy: zion::routing::Policy::Direct,
+            ..Default::default()
+        },
+        ..Config::default()
+    };
+    let mut proxy = Proxy::start(config, false).await;
+    timeout(
+        Duration::from_secs(5),
+        mixed_socks_tcp(proxy.address, "127.0.0.1:0"),
+    )
+    .await
+    .unwrap();
+    timeout(Duration::from_secs(5), mixed_socks_udp(proxy.address))
+        .await
+        .unwrap();
+    proxy.stop().await;
+}
+
+/// REJECT denies both SOCKS commands without establishing any outbound target connection.
+#[tokio::test]
+async fn reject_policy_denies_tcp_and_udp() {
+    let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut proxy = Proxy::start(
+        Config {
+            routing: zion::routing::Routing {
+                default_policy: zion::routing::Policy::Reject,
+                ..Default::default()
+            },
+            ..Config::default()
+        },
+        false,
+    )
+    .await;
+    for kind in [1, 3] {
+        let mut socket = negotiate(proxy.address).await;
+        assert_eq!(
+            command(
+                &mut socket,
+                kind,
+                TargetAddr::Ip(target.local_addr().unwrap())
+            )
+            .await
+            .0,
+            2
+        );
+    }
+    assert!(
+        timeout(Duration::from_millis(100), target.accept())
+            .await
+            .is_err()
+    );
+    proxy.stop().await;
+}
+
+/// A matching process path changes actual egress while an unmatched process retains FINAL.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn process_path_rule_controls_actual_connection() {
+    use zion::routing::{Matcher, Policy, Routing, Rule};
+    let process_path = std::env::current_exe()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let mut proxy = Proxy::start(
+        Config {
+            routing: Routing {
+                default_policy: Policy::Reject,
+                rules: vec![Rule {
+                    matcher: Matcher::ProcessPath,
+                    value: process_path,
+                    policy: Policy::Direct,
+                    enabled: true,
+                }],
+            },
+            ..Config::default()
+        },
+        false,
+    )
+    .await;
+    timeout(
+        Duration::from_secs(5),
+        mixed_socks_tcp(proxy.address, "127.0.0.1:0"),
+    )
+    .await
+    .unwrap();
+    proxy.stop().await;
+    let mut proxy = Proxy::start(
+        Config {
+            routing: Routing {
+                default_policy: Policy::Reject,
+                rules: vec![Rule {
+                    matcher: Matcher::ProcessPath,
+                    value: "/not/this/process".into(),
+                    policy: Policy::Direct,
+                    enabled: true,
+                }],
+            },
+            ..Config::default()
+        },
+        false,
+    )
+    .await;
+    let mut socket = negotiate(proxy.address).await;
+    assert_eq!(
+        command(
+            &mut socket,
+            1,
+            TargetAddr::Ip("127.0.0.1:1".parse().unwrap())
+        )
+        .await
+        .0,
+        2
+    );
+    proxy.stop().await;
+}

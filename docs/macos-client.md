@@ -1,86 +1,79 @@
 # macOS client
 
-The SwiftUI/AppKit app requires macOS 14 or later. Its connection state is shared by the main window and menu bar. The interface is currently in Chinese.
+Requires macOS 14+, Rust 1.91+, and an Xcode toolchain supporting Swift 6. The interface is in Chinese.
 
-## Build
-
-Use Rust 1.91 or later and an Xcode toolchain supporting Swift 6:
+## Build and start
 
 ```sh
 python3 scripts/build-macos.py
+open target/macos/Zion.app
 ```
 
-The script builds for the host architecture and creates `target/macos/Zion.app`, including `Contents/Helpers/zion-core` and the linked Rust packet engine. Signing defaults to local ad hoc signing. `ZION_CODESIGN_IDENTITY` selects an installed identity for the app and helpers; notarization and NetworkExtension entitlements are not configured.
+The host-architecture bundle includes `Contents/Helpers/zion-core` and the registration helper. It uses the supervised SOCKS core; the optional packet engine is not linked into the default app. Signing is local ad hoc signing unless `ZION_CODESIGN_IDENTITY` is supplied. Notarization is not part of the script.
 
-For a standalone Swift build:
+Standalone development must explicitly select its core:
 
 ```sh
-swift build --package-path macos
+cargo build --locked --bin zion
+ZION_CORE_PATH="$PWD/target/debug/zion" swift run --package-path macos ZionMac
 ```
 
-The development app looks for `target/debug/zion`; packaged builds use their bundled core. `ZION_CORE_PATH` overrides either location. See [backends](backends.md) for static-library linking and native integration tests.
+Without `ZION_CORE_PATH`, the app only uses its bundled executable. It never searches the source tree for another core.
 
-## First launch
+## Workspace
 
-The setup guide appears on first launch and can be skipped without a server or network authorization. Continue and Skip both dismiss it; the optional every-launch checkbox is saved in the private `setup.json` file. Reopen it from Settings or the app/menu-bar commands.
+- **概览**: server selection, connection, and network recovery.
+- **服务器**: profiles and JSON import. Optional CA, certificate-name, interface, and additional client-certificate fields are under Advanced.
+- **进程流量**: per-process uploads, downloads, active connections, and connection decisions. Select a process to filter the resizable connection pane.
+- **规则与策略**: exact process-name/path rules in explicit priority order, with proxy/direct/reject policies and a FINAL default.
+- **日志**: searchable session events, severity filters, follow, clear, and copy diagnostics. Connection status stays on Overview and Settings.
+- **设置**: connection backend, listener, configuration directory, setup guide, and version.
 
-The guide reads enabled global and interface-scoped proxy mechanisms and lists up, addressed virtual interfaces. Interfaces belonging to VPNs or other apps are not attributed to Zion. Failed detection is shown as unknown rather than disabled. Returning to the app or completing a connection refreshes the display.
+The workspace is full width and left aligned, with borderless controls and shared 8/16/32-point spacing. The sidebar contains navigation only.
 
-Opening the guide does not change networking. System proxy activation requires an explicit connection action and uses the existing authentication and restoration flow. Helper installation and approval remain explicit. Enhanced-mode routing is still unavailable.
+The first-launch guide can be dismissed with **完成** without configuring a server or connecting. **启动时显示** controls future launches. Opening it only inspects network state; connection and component registration remain explicit actions. Enhanced-mode details are collapsed by default.
 
-## Profiles
+## Process routing and traffic
 
-Add a name, server address, and password, or use a client certificate. Advanced password settings can include a certificate pair when both factors are required. Private CA files, certificate-name overrides, and outbound interfaces are supported.
+First enabled exact, case-sensitive match wins; unmatched or unidentified processes use FINAL. Proxy uses the selected server; direct uses the local network and resolver; reject denies the SOCKS command. A failed proxy does not switch to direct access. UDP uses the owner of its TCP association for all datagrams.
 
-The app imports JSON client configurations; the CLI also accepts YAML. Relative certificate paths are resolved from the imported file's directory. Import does not delete or redact the original file.
+Disconnect before changing rules, then reconnect. The process table's policy menu adds the rule at highest priority, preferring the executable path and using the process name only when its path is unavailable. The rule page supports enable/disable, ordering, policy changes, and deletion.
 
-Profiles live in `~/Library/Application Support/Zion/profiles.json`. Passwords are stored in Keychain; selected private keys remain in their original files. Backend selection is saved separately in `connection.json`.
+Ownership is best effort on macOS: bounded `lsof` queries match the exact client-to-listener socket, then `ps` supplies the executable path. Four queries run concurrently, with a 750 ms deadline including queueing. Permission failures, exited processes, and timeouts appear as unknown ownership. Processes bypassing SOCKS are outside routing and statistics.
 
-## App control
+Traffic history is memory-only, capped at 500 connections. Totals cover retained connections, preserving active entries when evicting history. Updates arrive about once a second. TCP counts application data; UDP includes SOCKS envelopes; tunnel overhead is excluded. A new core clears history, and clearing completed connections preserves active counters.
 
-The [app control CLI](cli.md) manages profiles and connections through a same-user local socket. Changes appear in the running UI; passwords remain in Keychain. Restart an older app build before using these commands.
+## Storage and import
 
-## Core process
+Metadata lives in `~/Library/Application Support/Zion/`:
 
-The system-proxy backend launches:
+| File | Content |
+| --- | --- |
+| `profiles.json` | Current profile schema and selection; stored profiles require an explicit transport |
+| `routing.json` | Ordered global process rules and default policy |
+| `connection.json` | Selected backend |
+| `setup.json` | Setup preference |
+| `proxy-recovery.plist` | Original network settings awaiting restoration |
 
-```sh
-zion-core client --config - --events-json
-```
+Passwords are in Keychain; selected certificate/private-key files stay in their original locations. Unreadable configuration is preserved and blocks the affected operation.
 
-Configuration is sent as JSON through stdin, then the pipe is closed. Stdout carries newline-delimited lifecycle events; diagnostics go to stderr:
+UI import accepts server-profile JSON; the [CLI](cli.md) also accepts YAML. Both use the same profile field validation. Certificate paths resolve relative to the source file. `listen` is ignored because the app allocates its own port. Global `routing` is not imported into a server profile; configure it on the rules page. Import leaves the source file untouched.
 
-```json
-{"event":"ready","listen":"127.0.0.1:49152"}
-{"event":"stopped"}
-```
+## Supervision and recovery
 
-Startup failure emits `{"event":"error","message":"..."}` and exits unsuccessfully. The core binds a random loopback port and authenticates a real session over the selected QUIC or TCP/TLS carrier before reporting ready. This is a startup probe, not ongoing health monitoring.
+The app sends configuration through stdin to `zion-core client --config - --events-json`. Stdout carries JSON lifecycle and traffic events; stderr carries diagnostics. The core binds a random IPv4 loopback port and verifies remote authentication before reporting ready, then the app requests system-proxy authorization.
 
-The controller validates the loopback address, bounds output buffering and startup time, and rejects callbacks from old processes. The Logs page shows connection state, the selected server and interface, the local listener, pending recovery, and the latest error. Session events include core output and connection or recovery failures. Search, severity filtering, follow-latest, clear, and copy-diagnostics are available.
+System proxy activation sets SOCKS on enabled services, temporarily disables HTTP/HTTPS/PAC/autodiscovery, removes SOCKS credentials, and preserves bypass rules. Disconnect restores the recorded settings while preserving external changes. If restoration fails, the core stays running and recovery is required before reconnecting. Normal app exit also attempts restoration. A forced exit may leave settings behind; recover on the next launch.
 
-Logs are held in memory: at most 500 lines, roughly 1 KiB per line. Known connection passwords, named secret fields, private-key blocks, and terminal escapes are filtered before retention. Copied reports include server addresses and system version. Clearing or restarting discards retained entries; no log file is written. Traffic counters and latency measurements are not implemented.
+Logs retain at most 500 entries in memory, roughly 1 KiB each. Known passwords, named secret fields, private-key blocks, and terminal escapes are filtered. Copied diagnostics include server addresses and system version. No log file is written.
 
-## System proxy and recovery
+Only applications honoring system SOCKS settings are covered. There is no full-device capture, kill switch, automatic network-location tracking, or live rule reload. Helper registration does not enable TUN routing; see [backend status](backends.md).
 
-After core readiness, the app requests network-settings authorization and sets SOCKS on enabled network services in the current location. It temporarily disables HTTP, HTTPS, PAC, and autodiscovery, removes SOCKS credentials, and preserves bypass rules.
-
-A mode-`0600` recovery journal, `proxy-recovery.plist`, is saved before settings change. It can contain previous proxy credentials. Disconnect restores the snapshot; services changed by another application are preserved. If restoration fails, the core stays running and reconnection is blocked until recovery succeeds. Normal app exit also attempts restoration.
-
-The app does not continuously track new services or network-location changes. A forced exit can leave settings and the core process behind; recovery is available on the next launch. There is no independent cleanup daemon.
-
-Only applications honoring system SOCKS settings are covered. This mode provides neither full-device capture nor a kill switch. NetworkExtension and helper-based TUN adapters are [unfinished](backends.md).
-
-## Helper component
-
-The Helper TUN selection includes install, approval, refresh, and uninstall controls backed by Service Management. Registration and TUN readiness are separate: the current component has no network-management operations. See [backends](backends.md) for packaging, signing, and remaining work.
-
-## Tests
+## Validation and cleanup
 
 ```sh
 swift test --package-path macos
+python3 scripts/clean-build.py
 ```
 
-Control tests use temporary files and substitute network settings, without writing system proxy preferences or Keychain. Optional real-core tests use a local server with both carriers. They do not validate authorization dialogs, GUI layout, or live system-network takeover.
-
-Profiles offer an explicit UDP/QUIC or TCP/TLS selector. Existing profiles default to QUIC; changing transport preserves the UUID and Keychain entry. JSON import accepts the same `transport` field as the core configuration.
+Tests use temporary storage and substitute system-network/Keychain services. Optional real-core and native-library tests are described in [backends](backends.md). They do not exercise GUI layout or authorization dialogs. Cleanup retains the packaged app; add `--all` to remove it too.

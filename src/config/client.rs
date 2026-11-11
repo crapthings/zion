@@ -19,6 +19,8 @@ use tokio::{net::lookup_host, time::timeout};
 pub struct ClientConfig {
     pub server: String,
     #[serde(default)]
+    pub routing: crate::routing::Routing,
+    #[serde(default)]
     pub transport: crate::tunnel::Transport,
     pub password: Option<Password>,
     pub ca: Option<PathBuf>,
@@ -64,6 +66,7 @@ impl ClientConfig {
                 .is_none_or(|name| !name.is_empty()),
             "server_name cannot be empty"
         );
+        self.routing.validate()?;
         authority(&self.server)?;
         Ok(())
     }
@@ -85,6 +88,7 @@ impl ClientConfig {
         let (host, port) = authority(&self.server)?;
         let config = Config {
             listen: self.listen,
+            routing: self.routing,
             ..Config::default()
         };
         let remotes = timeout(config.connect_timeout, lookup_host((host.as_str(), port)))

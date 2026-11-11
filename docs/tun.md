@@ -1,6 +1,6 @@
 # TUN device transport
 
-The `tun-device` feature connects tun-rs 2.8.18 to the shared netstack-smoltcp 0.2.5 packet engine on macOS and Linux. netstack-smoltcp was already current. tun-rs requires Tokio 1.53 or later; the lockfile now selects Tokio 1.54.1.
+The optional `tun-device` feature connects tun-rs to the shared netstack-smoltcp packet engine on macOS and Linux. It is not enabled in the standard macOS app package.
 
 This is a library adapter and a foreground CLI entry point. The app's privileged helper still exposes only read-only status: descriptor transfer, route ownership, DNS policy, and recovery are not wired into the app. Installing the helper does not enable this transport.
 

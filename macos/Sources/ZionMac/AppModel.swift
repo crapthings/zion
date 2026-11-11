@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 import ZionControl
 
 /// Import values mirror the existing JSON schema and keep imported passwords out of profile storage.
-private struct ImportedConfiguration: Decodable {
+struct ImportedConfiguration: Decodable {
     let server: String
     let transport: TunnelTransport?
     let password: String?
@@ -19,7 +19,7 @@ private struct ImportedConfiguration: Decodable {
         case serverName = "server_name"
     }
 
-    /// Distinguish an omitted legacy carrier from an invalid explicit value such as null.
+    /// Distinguish an omitted optional carrier from an invalid explicit value such as null.
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         server = try values.decode(String.self, forKey: .server)
@@ -32,12 +32,29 @@ private struct ImportedConfiguration: Decodable {
         interface = try values.decodeIfPresent(String.self, forKey: .interface)
     }
 
+    /// Validate the same bounded profile-import schema for file imports and local commands.
+    static func parse(_ data: Data) throws -> Self {
+        guard data.count <= 64 * 1024,
+              let fields = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(fields.keys).isSubset(of: ["server", "transport", "password", "ca", "cert", "key", "listen", "server_name", "interface"]) else {
+            throw ControlError("无效的服务器配置；全局规则请在规则页配置。")
+        }
+        let value = try JSONDecoder().decode(Self.self, from: data)
+        guard value.password == nil || (1...1024).contains(value.password!.utf8.count),
+              value.server.utf8.count <= 512,
+              [value.ca, value.cert, value.key, value.serverName, value.interface].allSatisfy({ ($0?.utf8.count ?? 0) <= 4096 }) else {
+            throw ControlError("服务器配置字段超过长度限制。")
+        }
+        return value
+    }
+
 }
 
 /// The application model coordinates profile storage, Keychain, and connection presentation.
 @Observable @MainActor final class AppModel {
     var document = ProfileDocument()
     let logs = DiagnosticLog()
+    let traffic: TrafficCenter
     var alert: String? { didSet { if let alert { logs.append(alert, level: .error) } } }
     var editing: ServerProfile?
     var editingPassword = ""
@@ -56,6 +73,11 @@ private struct ImportedConfiguration: Decodable {
         self.setupGuide = setupGuide ?? SetupGuide(directory: store.directory)
         self.helperInstallation = helperInstallation
         self.store = store
+        let traffic = TrafficCenter(directory: store.directory)
+        self.traffic = traffic
+        let core = CoreProcess()
+        core.onTraffic = { [weak traffic] record in traffic?.receive(record) }
+        core.onTrafficEnd = { [weak traffic] in traffic?.endSession() }
         self.secrets = secrets
         let preferences = ConnectionPreferencesStore(directory: store.directory)
         self.preferences = preferences
@@ -63,7 +85,7 @@ private struct ImportedConfiguration: Decodable {
         do { selected = try preferences.load().backend }
         catch { preferencesReadable = false; alert = "无法读取接管方式设置，连接已暂停，请检查 connection.json。" }
         self.connection = connection ?? BackendConnection(
-            system: ConnectionController(engine: CoreProcess(), proxy: SystemProxyController(journal: store.directory.appendingPathComponent("proxy-recovery.plist"))),
+            system: ConnectionController(engine: core, proxy: SystemProxyController(journal: store.directory.appendingPathComponent("proxy-recovery.plist"))),
             enhanced: [], selected: selected
         )
         helperInstallation.onLog = { [weak self] message in self?.append(message) }
@@ -97,7 +119,7 @@ private struct ImportedConfiguration: Decodable {
         } catch { alert = error.localizedDescription }
     }
 
-    var canConnect: Bool { editing == nil && !helperInstallation.busy && !storageError && preferencesReadable && connection.readiness(for: connection.selectedBackend).canConnect }
+    var canConnect: Bool { editing == nil && !helperInstallation.busy && !storageError && traffic.storageError == nil && preferencesReadable && connection.readiness(for: connection.selectedBackend).canConnect }
 
     /// Allow component changes only after all network ownership and recovery have ended.
     var canManageComponents: Bool { !storageError && connection.phase.idle && !connection.needsRecovery && !helperInstallation.busy && editing == nil }
@@ -210,10 +232,25 @@ private struct ImportedConfiguration: Decodable {
         guard preferencesReadable else { alert = "请先修复接管方式设置文件。"; return }
         guard let profile = selectedProfile else { edit(); return }
         do {
-            let password = profile.authentication == .password ? try secrets.password(for: profile.id) : nil
-            let configuration = try profile.configuration(password: password)
-            await connection.connect(configuration: configuration)
+            await connection.connect(configuration: try connectionConfiguration(for: profile))
         } catch { alert = error.localizedDescription }
+    }
+
+    /// Prepare credentials, saved routing, and traffic state for one authenticated connection.
+    private func connectionConfiguration(for profile: ServerProfile) throws -> CoreConfiguration {
+        if let error = traffic.storageError { throw ControlError(error) }
+        let password = profile.authentication == .password ? try secrets.password(for: profile.id) : nil
+        var configuration = try profile.configuration(password: password)
+        configuration.routing = traffic.routing
+        traffic.beginSession()
+        return configuration
+    }
+
+    /// Persist routing changes only when no core is using an earlier rules snapshot.
+    func saveRouting(_ value: RoutingDocument) {
+        guard connection.phase.idle, !connection.needsRecovery else { return }
+        do { try traffic.save(value) }
+        catch { alert = error.localizedDescription }
     }
 
     /// Import JSON into the normal editor so secrets are stored only after explicit saving.
@@ -225,8 +262,7 @@ private struct ImportedConfiguration: Decodable {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             let data = try Data(contentsOf: url)
-            guard data.count <= 64 * 1024 else { throw ControlError("配置文件超过 64 KiB。") }
-            let value = try JSONDecoder().decode(ImportedConfiguration.self, from: data)
+            let value = try ImportedConfiguration.parse(data)
             var profile = ServerProfile()
             profile.name = URLComponents(string: "quic://\(value.server)")?.host ?? "导入的服务器"
             profile.transport = value.transport ?? .quic
@@ -321,20 +357,14 @@ extension AppModel {
             try requireControlIdle()
             guard let source = arguments["config"], let data = source.data(using: .utf8), data.count <= 64 * 1024,
                   let name = arguments["name"], !name.isEmpty, name.utf8.count <= 128, document.profiles.count < 64 else { throw AppCommandError("invalid_arguments", "Import requires name and JSON config.") }
-            guard let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  Set(fields.keys).isSubset(of: ["server", "transport", "password", "ca", "cert", "key", "listen", "server_name", "interface"]) else {
-                throw AppCommandError("invalid_arguments", "Unknown client configuration fields.")
-            }
             let value: ImportedConfiguration
-            do { value = try JSONDecoder().decode(ImportedConfiguration.self, from: data) }
-            catch { throw AppCommandError("invalid_arguments", "Invalid client configuration.") }
-            guard value.password == nil || (1...1024).contains(value.password!.utf8.count) else { throw AppCommandError("invalid_arguments", "Password must contain 1 to 1024 bytes.") }
+            do { value = try ImportedConfiguration.parse(data) }
+            catch { throw AppCommandError("invalid_arguments", "Invalid server profile configuration; configure global routing separately.") }
             var profile = ServerProfile()
             profile.name = name; profile.server = value.server; profile.transport = value.transport ?? .quic
             profile.authentication = value.password == nil ? .certificate : .password
             profile.ca = value.ca ?? ""; profile.certificate = value.cert ?? ""; profile.privateKey = value.key ?? ""
             profile.serverName = value.serverName ?? ""; profile.interface = value.interface ?? ""
-            guard profile.server.utf8.count <= 512, [profile.ca, profile.certificate, profile.privateKey, profile.serverName, profile.interface].allSatisfy({ $0.utf8.count <= 4096 }) else { throw AppCommandError("invalid_arguments", "Profile fields exceed size limits.") }
             try save(profile, password: value.password ?? "")
             return ["id": profile.id.uuidString]
         case "profiles.transport":
@@ -377,8 +407,7 @@ extension AppModel {
             try requireControlIdle()
             guard canConnect else { throw AppCommandError("backend_unavailable", "Selected backend is unavailable.") }
             guard let profile = selectedProfile else { throw AppCommandError("no_profile", "Import and select a server first.") }
-            let password = profile.authentication == .password ? try secrets.password(for: profile.id) : nil
-            await connection.connect(configuration: try profile.configuration(password: password))
+            await connection.connect(configuration: try connectionConfiguration(for: profile))
             guard connection.phase.connected else { throw AppCommandError("connection_failed", "Connection did not complete; inspect app status and activity.") }
             return controlStatus()
         case "disconnect":

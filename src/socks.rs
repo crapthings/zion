@@ -22,24 +22,57 @@ pub async fn serve(socket: TcpStream, config: Config) -> anyhow::Result<()> {
     let local = socket.local_addr()?;
     socket.set_nodelay(true)?;
     let (request, command, target) = read_request(socket, config.handshake_timeout).await?;
-    match command {
-        Socks5Command::TCPConnect => relay_tcp(request, &target, &config).await,
+    let process = crate::process::identify(peer, local).await;
+    let (policy, rule) = config.routing.decide(&process);
+    let protocol = if command == Socks5Command::UDPAssociate {
+        "UDP"
+    } else {
+        "TCP"
+    };
+    let mut flow = crate::traffic::Flow::start(
+        process,
+        target.to_string(),
+        protocol,
+        policy,
+        rule,
+        config.traffic_events,
+    );
+    if policy == crate::routing::Policy::Reject {
+        flow.finish("rejected");
+        request
+            .reply_error(&ReplyError::ConnectionNotAllowed)
+            .await?;
+        return Ok(());
+    }
+    let mut config = config;
+    if policy == crate::routing::Policy::Direct {
+        config.tunnel = None;
+    }
+    let result = match command {
+        Socks5Command::TCPConnect => relay_tcp(request, &target, &config, &flow).await,
         Socks5Command::UDPAssociate => {
-            crate::udp::relay(request, peer, local.ip(), target, &config).await
+            crate::udp::relay(request, peer, local.ip(), target, &config, &flow).await
         }
         _ => {
             request
                 .reply_error(&ReplyError::CommandNotSupported)
                 .await?;
-            Ok(())
+            anyhow::bail!("unsupported SOCKS command")
         }
-    }
+    };
+    flow.finish(if result.is_ok() { "closed" } else { "failed" });
+    result
 }
 
 /// Connect an outbound TCP stream before acknowledging and relaying both directions.
-async fn relay_tcp(request: Command, target: &TargetAddr, config: &Config) -> anyhow::Result<()> {
+async fn relay_tcp(
+    request: Command,
+    target: &TargetAddr,
+    config: &Config,
+    flow: &crate::traffic::Flow,
+) -> anyhow::Result<()> {
     if let Some(client) = &config.tunnel {
-        return relay_tunnel_tcp(request, target, config, client).await;
+        return relay_tunnel_tcp(request, target, config, client, flow).await;
     }
     let mut outbound =
         match crate::outbound::connect_with(&config.resolver, target, config.connect_timeout).await
@@ -54,7 +87,7 @@ async fn relay_tcp(request: Command, target: &TargetAddr, config: &Config) -> an
                 return Err(error.into());
             }
         };
-    let mut socket = request.reply_success(outbound.local_addr()?).await?;
+    let mut socket = flow.stream(request.reply_success(outbound.local_addr()?).await?);
     let (sent, received) = copy_bidirectional(&mut socket, &mut outbound).await?;
     tracing::debug!(sent, received, "TCP relay completed");
     Ok(())
@@ -80,6 +113,7 @@ async fn relay_tunnel_tcp(
     target: &TargetAddr,
     config: &Config,
     client: &crate::tunnel::Client,
+    flow: &crate::traffic::Flow,
 ) -> anyhow::Result<()> {
     let mut session = match client.tcp(target, config.connect_timeout).await {
         Ok(session) => session,
@@ -92,7 +126,7 @@ async fn relay_tunnel_tcp(
             return Err(error);
         }
     };
-    let mut socket = request.reply_success(session.bound).await?;
+    let mut socket = flow.stream(request.reply_success(session.bound).await?);
     copy_bidirectional(&mut socket, &mut session.io).await?;
     session.acknowledged().await?;
     Ok(())
