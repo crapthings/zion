@@ -4,7 +4,7 @@ The local SOCKS listener, QUIC or TCP/TLS carrier, and destination each choose t
 
 ## Listeners
 
-The server defaults to `[::]:8443` with `IPV6_V6ONLY=false`, accepting both families on one UDP port. If IPv6 or dual-stack binding is unavailable, startup fails. For an IPv4-only host, set:
+The server defaults to `[::]:8443` with `IPV6_V6ONLY=false`, accepting both address families on each configured TCP or UDP socket. If IPv6 or dual-stack binding is unavailable, startup fails. For an IPv4-only host, set:
 
 ```yaml
 listen: "0.0.0.0:8443"
